@@ -1,102 +1,86 @@
-import { ColorValue, Platform } from "react-native";
-const PlatformColor =
-  Platform.OS === "web" ? () => {} : require("react-native").PlatformColor;
+/*
+    Project: Hoot Mobile
+    -------------------
 
-export interface ColorsObject {
-  tint: ColorValue;
-  secondaryTint: ColorValue;
-  text: ColorValue;
-  secondaryText: ColorValue;
-  placeholderText: ColorValue;
-  background: ColorValue;
-  secondaryBackground: ColorValue;
-  tertiaryBackground: ColorValue;
-  tabIconDefault: ColorValue;
-  tabIconSelected: ColorValue;
+    File: Colors.ts
 
-  red: ColorValue;
-  orange: ColorValue;
-  yellow: ColorValue;
-  green: ColorValue;
-  teal: ColorValue;
-  blue: ColorValue;
-  indigo: ColorValue;
-  purple: ColorValue;
-}
+    Purpose:
 
-export default {
-  light: Platform.OS === "ios" ? buildIOS() : buildAltLight(),
-  dark: Platform.OS === "ios" ? buildIOS() : buildAltDark(),
+        Centralized theme tokens used by the app and styling utilities.
+
+    Responsibilities:
+
+        • Define default light/dark color palettes
+        • Provide strongly typed color names consumed by components
+
+    This file intentionally does not contain:
+
+        • Theme switching logic (handled by hooks/useTheme.ts)
+        • Network or API request logic
+*/
+
+export type ColorsObject = {
+  background: string;
+  secondaryBackground: string;
+  tertiaryBackground: string;
+  text: string;
+  secondaryText: string;
+  placeholderText: string;
+  tint: string;
+  secondaryTint: string;
+  red: string;
+  orange: string;
+  yellow: string;
+  green: string;
+  teal: string;
+  blue: string;
+  indigo: string;
+  purple: string;
+  tabIconDefault: string;
+  tabIconSelected: string;
+  tabBar: string;
 };
 
-function buildIOS(): ColorsObject {
-  return {
-    tint: PlatformColor("systemOrange"),
-    secondaryTint: PlatformColor("systemPurple"),
-    text: PlatformColor("label"),
-    secondaryText: PlatformColor("secondaryLabel"),
-    placeholderText: PlatformColor("placeholderText"),
-    background: PlatformColor("systemBackground"),
-    secondaryBackground: PlatformColor("secondarySystemBackground"),
-    tertiaryBackground: PlatformColor("tertiarySystemBackground"),
-    tabIconDefault: PlatformColor("secondaryLabel"),
-    tabIconSelected: PlatformColor("systemOrange"),
+const sharedPalette = {
+  red: "#ff6b6b",
+  orange: "#ff9f43",
+  yellow: "#f5a524",
+  green: "#2ecc71",
+  teal: "#48dbfb",
+  blue: "#2e86de",
+  indigo: "#5f5ce5",
+  purple: "#a855f7",
+  tint: "#f5a524",
+  secondaryTint: "#ff9f43",
+};
 
-    red: PlatformColor("systemRed"),
-    orange: PlatformColor("systemOrange"),
-    yellow: PlatformColor("systemYellow"),
-    green: PlatformColor("systemGreen"),
-    teal: PlatformColor("systemTeal"),
-    blue: PlatformColor("systemBlue"),
-    indigo: PlatformColor("systemIndigo"),
-    purple: PlatformColor("systemPurple"),
-  };
-}
+const Colors = {
+  light: {
+    background: "#ffffff",
+    secondaryBackground: "#f1f5f9",
+    tertiaryBackground: "#e2e8f0",
+    text: "#111827",
+    secondaryText: "#6b7280",
+    placeholderText: "#94a3b8",
+    tabIconDefault: "#687076",
+    tabIconSelected: sharedPalette.tint,
+    tabBar: "#ffffff",
+    ...sharedPalette,
+  },
+  dark: {
+    background: "#000000",
+    secondaryBackground: "#181818",
+    tertiaryBackground: "#242424",
+    text: "#f1f5f9",
+    secondaryText: "#94a3b8",
+    placeholderText: "#64748b",
+    tabIconDefault: "#9ca3af",
+    tabIconSelected: sharedPalette.tint,
+    tabBar: "#000000",
+    ...sharedPalette,
+  },
+};
 
-function buildAltLight(): ColorsObject {
-  return {
-    tint: "orange",
-    secondaryTint: "purple",
-    text: "#111",
-    secondaryText: "#333",
-    placeholderText: "#444",
-    background: "#fff",
-    secondaryBackground: "#eee",
-    tertiaryBackground: "#ccc",
-    tabIconDefault: "#ccc",
-    tabIconSelected: "orange",
+export default Colors;
 
-    red: "red",
-    orange: "orange",
-    yellow: "yellow",
-    green: "green",
-    teal: "eeal",
-    blue: "blue",
-    indigo: "indigo",
-    purple: "purple",
-  };
-}
-
-function buildAltDark(): ColorsObject {
-  return {
-    tint: "orange",
-    secondaryTint: "purple",
-    text: "#fff",
-    secondaryText: "#666",
-    placeholderText: "#aaa",
-    background: "#111",
-    secondaryBackground: "#222",
-    tertiaryBackground: "#222",
-    tabIconDefault: "#ccc",
-    tabIconSelected: "orange",
-
-    red: "red",
-    orange: "orange",
-    yellow: "yellow",
-    green: "green",
-    teal: "eeal",
-    blue: "#68f",
-    indigo: "indigo",
-    purple: "purple",
-  };
-}
+/* end of Colors.ts */

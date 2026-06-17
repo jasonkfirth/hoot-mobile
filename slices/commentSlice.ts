@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: commentSlice.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 export interface CommentState {
@@ -72,3 +87,5 @@ export const {
 } = commentSlice.actions;
 
 export default commentSlice.reducer;
+
+/* end of commentSlice.ts */

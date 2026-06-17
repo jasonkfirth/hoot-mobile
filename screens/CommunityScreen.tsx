@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: CommunityScreen.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useEffect, useState } from "react";
 import { Alert, Button, FlatList, Pressable, StyleSheet } from "react-native";
 import { View, Text } from "../components/Themed";
@@ -10,45 +25,100 @@ import { ActorDisplay } from "../components/ActorDisplay";
 import { useNavigation } from "@react-navigation/native";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import useFeed from "../hooks/useFeed";
+import ContentDisplay from "../components/ContentDisplay";
+import RetryState from "../components/RetryState";
 
 export default function CommunityScreen({
   route,
 }: RootStackScreenProps<"Community">) {
-  const [community, setCommunity] = useState(route.params.community);
-  const [posts, loadNextPage, refreshPosts] = useFeed({
+  const [communityLoadError, setCommunityLoadError] = useState("");
+  const routeCommunity = route.params?.community;
+  const communityId = getRouteCommunityId(route.params);
+  const [community, setCommunity] = useState<Community | null>(null);
+  const [posts, loadNextPage, refreshPosts, feedLoadError] = useFeed({
     sort: "hot",
-    communityId: community.id,
+    communityId,
+    enabled: !!communityId,
   });
   const [reloadId, setReloadId] = useState(0);
   const theme = useTheme();
   const ctx = useLotideCtx();
+  const currentCommunity = getRenderableCommunity(routeCommunity) || community;
+
+  const retryCommunityLoad = () => {
+    setCommunityLoadError("");
+    setReloadId(x => x + 1);
+  };
 
   useEffect(() => {
-    if (!ctx) return;
-    LotideService.getCommunity(ctx, community.id).then(setCommunity);
-  }, [
-    ctx?.apiUrl,
-    route.params.community.id,
-    route.params.community.description,
-    reloadId,
-  ]);
+    if (!ctx || !communityId) return;
+
+    LotideService.getCommunity(ctx, communityId)
+      .then(data => {
+        setCommunity(data);
+        setCommunityLoadError("");
+      })
+      .catch(() => {
+        setCommunity(null);
+        setCommunityLoadError("Cannot load community");
+      });
+  }, [ctx, communityId, reloadId]);
+
+  if (!currentCommunity) {
+    return (
+      <View
+        style={[styles.root, { backgroundColor: theme.background }]}
+      >
+        {communityLoadError && communityId ? (
+          <RetryState
+            message={communityLoadError}
+            onRetry={retryCommunityLoad}
+            style={styles.emptyState}
+          />
+        ) : (
+          <Text>
+            {communityId ? "Loading community" : "Cannot load community"}
+          </Text>
+        )}
+      </View>
+    );
+  }
 
   const renderItem = ({ item }: { item: PostId }) => <Item postId={item} />;
 
+  const feedList = (
+    <FlatList
+      data={posts}
+      renderItem={renderItem}
+      ListHeaderComponent={
+        <ListHeader
+          community={currentCommunity}
+          communityLoadError={communityLoadError}
+          onRetryCommunity={retryCommunityLoad}
+          setReloadId={setReloadId}
+        />
+      }
+      ListEmptyComponent={
+        feedLoadError ? (
+          <RetryState
+            compact
+            message={feedLoadError}
+            onRetry={refreshPosts}
+            style={[styles.emptyState, { borderColor: theme.secondaryBackground }]}
+          />
+        ) : null
+      }
+      keyExtractor={(postId, index) => `${postId}-${index}`}
+      refreshing={posts.length === 0 && !feedLoadError}
+      onRefresh={refreshPosts}
+      onEndReachedThreshold={2}
+      onEndReached={loadNextPage}
+    />
+  );
+
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
-      <FlatList
-        data={posts}
-        renderItem={renderItem}
-        ListHeaderComponent={
-          <ListHeader community={community} setReloadId={setReloadId} />
-        }
-        keyExtractor={(postId, index) => `${postId}-${index}`}
-        refreshing={posts.length == 0}
-        onRefresh={refreshPosts}
-        onEndReachedThreshold={2}
-        onEndReached={loadNextPage}
-      />
+      {feedList}
     </View>
   );
 }
@@ -80,11 +150,47 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     borderBottomWidth: 8,
   },
+  emptyState: {
+    padding: 20,
+    borderTopWidth: StyleSheet.hairlineWidth || 1,
+  },
+  headerRetry: {
+    marginTop: 15,
+  },
 });
+
+function getRouteCommunityId(
+  params: RootStackScreenProps<"Community">["route"]["params"],
+): CommunityId | undefined {
+  const rawId = params?.community?.id ?? params?.id;
+
+  if (typeof rawId === "number" && Number.isFinite(rawId)) {
+    return rawId;
+  }
+
+  if (typeof rawId === "string" && rawId.trim() !== "") {
+    const numericId = Number(rawId);
+    if (Number.isFinite(numericId)) {
+      return numericId;
+    }
+  }
+
+  return undefined;
+}
+
+function getRenderableCommunity(
+  community?: Partial<Community>,
+): Community | null {
+  if (!community?.id || !community.name || !community.host) {
+    return null;
+  }
+
+  return community as Community;
+}
 
 const Item = ({ postId }: { postId: PostId }) => {
   const theme = useTheme();
-  const navigation = useNavigation();
+  const navigation = useNavigation<RootStackScreenProps<"Community">["navigation"]>();
   return (
     <Pressable
       onPress={() => navigation.navigate("Post", { postId })}
@@ -103,13 +209,17 @@ const Item = ({ postId }: { postId: PostId }) => {
 
 type ListHeaderProps = {
   community: Community;
+  communityLoadError: string;
+  onRetryCommunity: () => void;
   setReloadId: (a: (x: number) => number) => void;
 };
 
-const ListHeader = React.memo((props: ListHeaderProps) => {
+const ListHeader = React.memo(function ListHeader(props: ListHeaderProps) {
   const theme = useTheme();
-  const navigation = useNavigation();
+  const navigation = useNavigation<RootStackScreenProps<"Community">["navigation"]>();
   const community = props.community;
+  const communityLoadError = props.communityLoadError;
+  const onRetryCommunity = props.onRetryCommunity;
   const setReloadId = props.setReloadId;
   const ctx = useLotideCtx();
 
@@ -117,22 +227,30 @@ const ListHeader = React.memo((props: ListHeaderProps) => {
 
   function follow() {
     if (!ctx) return;
-    LotideService.followCommunity(ctx, community.id).then(data => {
-      if (data.accepted === false) {
-        Alert.alert(
-          "Follow request rejected.",
-          "This could be an issue with the node you are connected to.",
-        );
-      }
-      setReloadId(x => x + 1);
-    });
+    LotideService.followCommunity(ctx, community.id)
+      .then(data => {
+        if (data.accepted === false) {
+          Alert.alert(
+            "Follow request not accepted yet.",
+            "This can happen while the other node is still processing it.",
+          );
+        }
+        setReloadId(x => x + 1);
+      })
+      .catch(() => {
+        Alert.alert("Failed to follow community");
+      });
   }
 
   function unfollow() {
     if (!ctx) return;
-    LotideService.unfollowCommunity(ctx, community.id).then(() => {
-      setReloadId(x => x + 1);
-    });
+    LotideService.unfollowCommunity(ctx, community.id)
+      .then(() => {
+        setReloadId(x => x + 1);
+      })
+      .catch(() => {
+        Alert.alert("Failed to unfollow community");
+      });
   }
 
   return (
@@ -154,9 +272,24 @@ const ListHeader = React.memo((props: ListHeaderProps) => {
           showHost="always"
           styleName={[styles.title]}
         />
-        {community.description !== "" && (
-          <Text style={styles.description}>{community.description}</Text>
-        )}
+        {community.description !== "" &&
+          (typeof community.description === "string" ? (
+            <Text style={styles.description}>{community.description}</Text>
+          ) : (
+            <ContentDisplay
+              contentHtml={community.description?.content_html}
+              contentMarkdown={community.description?.content_markdown}
+              contentText={community.description?.content_text}
+            />
+          ))}
+        {communityLoadError ? (
+          <RetryState
+            compact
+            message={communityLoadError}
+            onRetry={onRetryCommunity}
+            style={styles.headerRetry}
+          />
+        ) : null}
       </View>
       {!!ctx && (
         <View style={[styles.buttons]}>
@@ -196,3 +329,5 @@ const ListHeader = React.memo((props: ListHeaderProps) => {
     </View>
   );
 });
+
+/* end of CommunityScreen.tsx */

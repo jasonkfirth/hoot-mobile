@@ -1,101 +1,135 @@
-import React, { ReactNode, useMemo, useState } from "react";
-import { Text, View } from "react-native";
-import { Platform, Pressable, StyleSheet } from "react-native";
-import HTMLView, { HTMLViewNode } from "react-native-htmlview";
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: ContentDisplay.tsx
+
+    Purpose:
+
+        Render Lotide post, comment, and community description content in
+        native React Native views.
+
+    Responsibilities:
+
+        • Choose the best available server-provided content representation
+        • Render sanitized text fallback content through the HTML renderer
+        • Apply Hoot theme styling to common HTML elements
+        • Provide compact plain-text previews when callers request maxChars
+
+    This file intentionally does NOT contain:
+
+        • Lotide API fetching
+        • Markdown editing or full Markdown compatibility
+        • WebView-based embedded media rendering
+*/
+
+import React, { useMemo, useState } from "react";
+import {
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import RenderHtml, {
+  TChildrenRenderer,
+  TNodeChildrenRenderer,
+  type CustomRendererProps,
+  type CustomTagRendererRecord,
+  type TBlock,
+  type TPhrasing,
+} from "react-native-render-html";
 import Icon from "@expo/vector-icons/Ionicons";
 import useTheme from "../hooks/useTheme";
-import { Alert } from "react-native";
-import { ColorsObject } from "../constants/Colors";
 
 export interface ContentDisplayProps {
-  contentHtml?: string;
-  contentText?: string;
-  contentMarkdown?: string;
+  contentHtml?: string | null;
+  contentText?: string | null;
+  contentMarkdown?: string | null;
   maxChars?: number;
   postId?: PostId;
 }
 
 export default function ContentDisplay(props: ContentDisplayProps) {
-  const [isTruncated, setIsTruncated] = useState(false);
+  const {
+    contentHtml,
+    contentMarkdown,
+    contentText,
+    maxChars,
+  } = props;
   const theme = useTheme();
-  const html = useMemo(
-    () =>
-      props.contentHtml ||
-      parseMarkdown(props.contentMarkdown) ||
-      `<p>${props.contentText}</p>`,
-    [props.contentHtml, props.contentMarkdown, props.contentText],
+  const { width } = useWindowDimensions();
+  const { html, isTruncated } = useMemo(
+    () => buildDisplayHtml({
+      contentHtml,
+      contentMarkdown,
+      contentText,
+      maxChars,
+    }),
+    [contentHtml, contentMarkdown, contentText, maxChars],
   );
 
-  const maxChars = props.maxChars;
+  const contentWidth = Math.max(0, width - 30);
+  const monoFont = Platform.OS === "ios" ? "Menlo" : "monospace";
 
-  const countedRenderNode = () => {
-    let charCount = 0;
-    let isSkip = false;
-    return (
-      node: HTMLViewNode,
-      index: number,
-      siblings: HTMLViewNode,
-      parent: HTMLViewNode,
-      defaultRenderer: (node: HTMLViewNode, parent: HTMLViewNode) => ReactNode,
-    ) => {
-      if (!maxChars)
-        return renderNode(theme)(
-          node,
-          index,
-          siblings,
-          parent,
-          defaultRenderer,
-        );
-      if (isSkip) return undefined;
-      if (charCount >= maxChars) return null;
-      if (node.name === undefined && node.data && charCount < maxChars) {
-        let newCharCount = charCount + node.data.length;
-        if (newCharCount >= maxChars && charCount < maxChars) {
-          const delta = maxChars - charCount;
-          charCount = newCharCount;
-          isSkip = true;
-          const x = defaultRenderer(
-            [
-              { ...node, data: node.data.substring(0, delta) + "..." },
-            ] as any as HTMLViewNode,
-            parent,
-          );
-          isSkip = false;
-          setIsTruncated(true);
-          return x;
-        }
-        charCount = newCharCount;
-      }
-      return renderNode(theme)(node, index, siblings, parent, defaultRenderer);
-    };
-  };
+  const renderers = useMemo(
+    () => ({
+      abbr: AbbrRenderer,
+      details: DetailsRenderer,
+      img: ImageRenderer,
+    }) as unknown as CustomTagRendererRecord,
+    [],
+  );
 
   return (
     <View>
-      <HTMLView
-        RootComponent={props => <Text {...props} />}
-        value={html.replace(/\n/g, "")}
-        renderNode={countedRenderNode()}
-        stylesheet={{
-          a: { color: theme.secondaryTint },
+      <RenderHtml
+        contentWidth={contentWidth}
+        source={{ html }}
+        ignoredDomTags={["iframe", "script"]}
+        renderers={renderers}
+        renderersProps={{
+          a: {
+            onPress: (_event, href) => openLink(href),
+          },
+        }}
+        baseStyle={{
+          color: theme.text,
+        }}
+        tagsStyles={{
+          a: {
+            color: theme.secondaryTint,
+          },
+          blockquote: {
+            borderLeftWidth: 2,
+            borderColor: theme.secondaryText,
+            paddingLeft: 10,
+            paddingVertical: 5,
+          },
           cite: { fontStyle: "italic" },
           del: {
             textDecorationLine: "line-through",
             textDecorationStyle: "solid",
           },
           dfn: { fontStyle: "italic" },
-          ins: { textDecorationLine: "underline" },
-          samp: { fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" },
-          small: { fontSize: 10 },
-        }}
-        textComponentProps={{
-          style: {
-            color: theme.text,
+          hr: {
+            borderBottomWidth: StyleSheet.hairlineWidth || 1,
+            borderColor: theme.secondaryText,
+            marginVertical: 8,
           },
+          ins: { textDecorationLine: "underline" },
+          kbd: {
+            backgroundColor: theme.tertiaryBackground,
+            paddingHorizontal: 4,
+          },
+          samp: { fontFamily: monoFont },
+          small: { fontSize: 10 },
+          sub: { fontSize: 10 },
+          sup: { fontSize: 10 },
         }}
-        onLinkLongPress={url =>
-          Alert.alert("Link", url, undefined, { cancelable: true })
-        }
       />
       {isTruncated && (
         <Text style={{ color: theme.secondaryText, paddingVertical: 15 }}>
@@ -106,127 +140,50 @@ export default function ContentDisplay(props: ContentDisplayProps) {
   );
 }
 
-const renderNode =
-  (theme: ColorsObject) =>
-  (
-    node: HTMLViewNode,
-    index: number,
-    siblings: HTMLViewNode,
-    parent: HTMLViewNode,
-    defaultRenderer: (node: HTMLViewNode, parent: HTMLViewNode) => ReactNode,
-  ) => {
-    if (["iframe", "script"].includes(node.name || "")) {
-      return null;
-    }
+function buildDisplayHtml(props: ContentDisplayProps) {
+  const fullHtml =
+    props.contentHtml ||
+    parseMarkdown(props.contentMarkdown) ||
+    `<p>${escapeHtml(props.contentText ?? "")}</p>`;
 
-    function children() {
-      return defaultRenderer((node as any).children, parent);
-    }
+  if (!props.maxChars || props.maxChars <= 0) {
+    return {
+      html: fullHtml,
+      isTruncated: false,
+    };
+  }
 
-    switch (node.name) {
-      case "abbr":
-        return (
-          <Pressable
-            key={index}
-            onPress={() => Alert.alert("Abbr.", node.attribs.title)}
-          >
-            <Text
-              style={{
-                textDecorationLine: "underline",
-                textDecorationStyle: "dotted",
-              }}
-            >
-              {children()}
-            </Text>
-          </Pressable>
-        );
-      case "blockquote":
-        return (
-          <Text key={index}>
-            <View style={{ padding: 10 }}>
-              <View
-                style={{
-                  borderLeftWidth: 2,
-                  borderColor: theme.secondaryText,
-                  paddingLeft: 10,
-                  paddingVertical: 5,
-                }}
-              >
-                {children()}
-              </View>
-            </View>
-            {"\n"}
-          </Text>
-        );
-      case "details":
-        return (
-          <Details key={index}>{children() as React.ReactChild[]}</Details>
-        );
-      case "dl":
-      case "dt":
-      case "dd":
-        return (
-          <Text key={index}>
-            {children()}
-            {"\n"}
-          </Text>
-        );
-      case "figure":
-        return <View key={index}>{children()}</View>;
-      case "hr":
-        return (
-          <View
-            key={index}
-            style={{
-              width: 200,
-              alignSelf: "stretch",
-              borderBottomWidth: StyleSheet.hairlineWidth || 1,
-              borderColor: theme.secondaryText,
-            }}
-          />
-        );
-      case "kbd":
-        return (
-          <Text
-            key={index}
-            style={{ backgroundColor: theme.tertiaryBackground }}
-          >
-            {" "}
-            {children()}{" "}
-          </Text>
-        );
-      case "img":
-        return <Text key={index}>[Image not displayed]</Text>;
-      case "li":
-        return (
-          <Text key={index}>
-            {"\u2022 "}
-            {children()}
-            {"\n"}
-          </Text>
-        );
-      case "sub":
-        return (
-          <Text key={index} style={{ fontSize: 10 }}>
-            {children()}
-          </Text>
-        );
-      case "summary":
-        return <Text key={index}>{children()}</Text>;
-      case "sup":
-        return (
-          <View key={index}>
-            <Text style={{ fontSize: 10 }}>{children()}</Text>
-          </View>
-        );
-      default:
-        return undefined;
-    }
+  const plainText = getBestPlainText(props);
+
+  if (plainText.length <= props.maxChars) {
+    return {
+      html: fullHtml,
+      isTruncated: false,
+    };
+  }
+
+  return {
+    html: `<p>${escapeHtml(plainText.substring(0, props.maxChars))}...</p>`,
+    isTruncated: true,
   };
+}
 
-function parseMarkdown(markdown?: string): string | undefined {
+function getBestPlainText(props: ContentDisplayProps) {
+  if (props.contentText) {
+    return props.contentText;
+  }
+
+  if (props.contentMarkdown) {
+    return stripMarkdown(props.contentMarkdown);
+  }
+
+  return stripHtml(props.contentHtml ?? "");
+}
+
+function parseMarkdown(markdown?: string | null): string | undefined {
   if (!markdown) return undefined;
-  return markdown
+
+  return escapeHtml(markdown)
     .replace(/^### (.*$)/gim, "<h3>$1</h3>")
     .replace(/^## (.*$)/gim, "<h2>$1</h2>")
     .replace(/^# (.*$)/gim, "<h1>$1</h1>")
@@ -239,13 +196,81 @@ function parseMarkdown(markdown?: string): string | undefined {
     .trim();
 }
 
-function Details({ children }: { children: React.ReactChild[] }) {
+function stripMarkdown(markdown: string) {
+  return markdown
+    .replace(/!\[(.*?)\]\((.*?)\)/gim, "$1")
+    .replace(/\[(.*?)\]\((.*?)\)/gim, "$1")
+    .replace(/[`*_>#-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripHtml(html: string) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function openLink(href: string) {
+  if (!isOpenableUrl(href)) {
+    Alert.alert("Link", href, undefined, { cancelable: true });
+    return;
+  }
+
+  Linking.openURL(href).catch(() => {
+    Alert.alert("Link", href, undefined, { cancelable: true });
+  });
+}
+
+function isOpenableUrl(href: string) {
+  return /^(https?:|mailto:)/i.test(href);
+}
+
+function AbbrRenderer({
+  tnode,
+}: CustomRendererProps<TPhrasing | TBlock>) {
+  return (
+    <Pressable
+      onPress={() => Alert.alert("Abbr.", tnode.attributes.title)}
+    >
+      <Text
+        style={{
+          textDecorationLine: "underline",
+          textDecorationStyle: "dotted",
+        }}
+      >
+        <TNodeChildrenRenderer tnode={tnode} />
+      </Text>
+    </Pressable>
+  );
+}
+
+function DetailsRenderer({
+  tnode,
+}: CustomRendererProps<TBlock>) {
   const [isOpen, setIsOpen] = useState(false);
   const theme = useTheme();
-
-  const [summary, ...realChildren] = children.filter(
-    (x: any) => x?.props?.children?.toString().trim() !== "",
-  );
+  const summaryNode = tnode.children.find(child => child.tagName === "summary");
+  const summaryNodes = summaryNode ? [summaryNode] : [];
+  const bodyNodes = tnode.children.filter(child => child !== summaryNode);
 
   return (
     <View>
@@ -256,10 +281,20 @@ function Details({ children }: { children: React.ReactChild[] }) {
           ) : (
             <Icon name="chevron-forward-outline" />
           )}
-          {summary}
+          {summaryNodes.length > 0 ? (
+            <TChildrenRenderer tchildren={summaryNodes} />
+          ) : (
+            "Details"
+          )}
         </Text>
       </Pressable>
-      {isOpen && realChildren}
+      {isOpen && <TChildrenRenderer tchildren={bodyNodes} />}
     </View>
   );
 }
+
+function ImageRenderer() {
+  return <Text>[Image not displayed]</Text>;
+}
+
+/* end of ContentDisplay.tsx */

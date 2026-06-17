@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: FeedScreen.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useState } from "react";
 import { StyleSheet, FlatList, Pressable, Platform } from "react-native";
 
@@ -5,7 +20,7 @@ import PostDisplay from "../components/PostDisplay";
 import { View } from "../components/Themed";
 import * as Haptics from "../services/HapticService";
 import useFeed from "../hooks/useFeed";
-import { RootTabScreenProps } from "../types";
+import { RootStackScreenProps, RootTabScreenProps } from "../types";
 import useTheme from "../hooks/useTheme";
 import SuggestLogin from "../components/SuggestLogin";
 import SwipeAction from "../components/SwipeAction";
@@ -14,6 +29,7 @@ import { useLotideCtx } from "../hooks/useLotideCtx";
 import { useSelector } from "react-redux";
 import { RootState } from "../store/reduxStore";
 import { useNavigation } from "@react-navigation/core";
+import RetryState from "../components/RetryState";
 
 export default function FeedScreen({
   navigation,
@@ -21,22 +37,33 @@ export default function FeedScreen({
 }: RootTabScreenProps<"FeedScreen">) {
   const sort = route.params.sort;
   const ctx = useLotideCtx();
-  const [posts, loadNextPage, resetPosts] = useFeed({
+  const theme = useTheme();
+  const [posts, loadNextPage, resetPosts, feedLoadError] = useFeed({
     sort,
     inYourFollows: true,
   });
   if (!ctx?.login) return <SuggestLogin />;
   const renderItem = ({ item }: { item: PostId }) => <Item postId={item} />;
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <FlatList
         data={posts}
         renderItem={renderItem}
         keyExtractor={(postId, index) => `${postId}-${index}`}
-        refreshing={posts.length == 0}
+        refreshing={posts.length === 0 && !feedLoadError}
         onRefresh={resetPosts}
         onEndReachedThreshold={2}
         onEndReached={loadNextPage}
+        ListEmptyComponent={
+          feedLoadError ? (
+            <RetryState
+              compact
+              message={feedLoadError}
+              onRetry={resetPosts}
+              style={styles.emptyState}
+            />
+          ) : null
+        }
       />
     </View>
   );
@@ -51,10 +78,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     borderBottomWidth: 8,
   },
+  emptyState: {
+    padding: 24,
+  },
   title: {
     fontSize: 20,
     padding: 15,
-    color: "#eee",
+    color: "#eeeeee",
   },
   contentText: {
     fontSize: 12,
@@ -62,7 +92,7 @@ const styles = StyleSheet.create({
   link: {
     paddingVertical: 10,
     paddingHorizontal: 15,
-    backgroundColor: "#8884",
+    backgroundColor: "#88888844",
     borderRadius: 5,
     marginHorizontal: 15,
   },
@@ -80,23 +110,30 @@ const styles = StyleSheet.create({
     padding: 15,
   },
   footText: {
-    color: "#ccc",
+    color: "#cccccc",
   },
   by: {
     fontSize: 11,
   },
   score: {
     fontSize: 18,
-    color: "#bbb",
+    color: "#bbbbbb",
   },
 });
 
 const Item = ({ postId }: { postId: PostId }) => {
   const post = useSelector((state: RootState) => state.posts.posts[postId]);
+
+  if (!post) return null;
+
+  return <LoadedItem postId={postId} post={post} />;
+};
+
+const LoadedItem = ({ postId, post }: { postId: PostId; post: Post }) => {
+  const theme = useTheme();
+  const navigation = useNavigation<RootStackScreenProps<"Post">["navigation"]>();
   const { isUpvoted, addVote, removeVote } = useVote("post", post);
   const [isCommitting, setIsCommitting] = useState(false);
-  const theme = useTheme();
-  const navigation = useNavigation();
 
   return (
     <SwipeAction
@@ -109,14 +146,18 @@ const Item = ({ postId }: { postId: PostId }) => {
       colorLeftSide={theme.red}
       colorRightSide={theme.blue}
       onLeftSide={() => {
-        isUpvoted ? removeVote() : addVote();
+        if (isUpvoted) {
+          removeVote();
+        } else {
+          addVote();
+        }
         setIsCommitting(true);
       }}
       onRightSide={() => {
         navigation.navigate("Comment", {
           id: post.id,
           title: post.title,
-          html: post.content_html,
+          html: post.content_html ?? "",
           type: "post",
         });
       }}
@@ -127,7 +168,7 @@ const Item = ({ postId }: { postId: PostId }) => {
       <Pressable
         style={{
           width: "100%",
-          ...(Platform.OS == "web" ? { cursor: "pointer" } : {}),
+          ...(Platform.OS === "web" ? { cursor: "pointer" } : {}),
         }}
         onPress={() => navigation.navigate("Post", { postId })}
         onLongPress={() => {
@@ -146,3 +187,5 @@ const Item = ({ postId }: { postId: PostId }) => {
     </SwipeAction>
   );
 };
+
+/* end of FeedScreen.tsx */

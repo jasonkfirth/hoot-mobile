@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: ActorDisplay.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React from "react";
 import { StyleProp, StyleSheet, TextStyle } from "react-native";
 import { Text } from "./Themed";
@@ -24,7 +39,7 @@ export function ActorDisplay(props: ActorDisplayProps) {
   const showHost = props.showHost || "only_foreign";
 
   const isUser: boolean =
-    (props.userId && props.userId == ctx?.login?.user.id) || false;
+    (props.userId && props.userId === ctx?.login?.user?.id) || false;
 
   const shouldDoIfLocal = (
     when: "always" | "never" | "only_foreign",
@@ -80,3 +95,5 @@ const styles = StyleSheet.create({
 });
 
 export default React.memo(ActorDisplay);
+
+/* end of ActorDisplay.tsx */

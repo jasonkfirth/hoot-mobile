@@ -1,15 +1,42 @@
-import { useState, useEffect } from "react";
+/*
+    Project: Hoot Mobile
+    -------------------
 
-export function useRefreshableData<T>(
+    File: useRefreshableData.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import { useState, useEffect, useRef } from "react";
+
+export function useRefreshableData(
   effect: (stopLoading: () => void) => void | (() => void | undefined),
-  deps: any[],
+  deps: unknown[],
 ): [boolean, () => void] {
   const [refreshCount, setRefreshCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const depsKey = JSON.stringify(deps);
+  const effectRef = useRef(effect);
 
   useEffect(() => {
-    effect(() => setIsLoading(false));
-  }, [refreshCount, ...deps]);
+    effectRef.current = effect;
+  }, [effect]);
+
+  useEffect(() => {
+    let isActive = true;
+    effectRef.current(() => {
+      if (isActive) setIsLoading(false);
+    });
+    return () => {
+      isActive = false;
+    };
+  }, [refreshCount, depsKey]);
 
   function refresh() {
     setRefreshCount(c => c + 1);
@@ -18,3 +45,5 @@ export function useRefreshableData<T>(
 
   return [isLoading, refresh];
 }
+
+/* end of useRefreshableData.ts */

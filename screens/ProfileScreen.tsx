@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: ProfileScreen.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useEffect, useState } from "react";
 import { Alert, Platform, ScrollView, StyleSheet } from "react-native";
 import { View, Text } from "../components/Themed";
@@ -7,11 +22,13 @@ import SuggestLogin from "../components/SuggestLogin";
 import * as LotideService from "../services/LotideService";
 import * as StorageService from "../services/StorageService";
 import useTheme from "../hooks/useTheme";
-import ActorDisplay from "../components/ActorDisplay";
+import ActorDisplayComponent from "../components/ActorDisplay";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import { useDispatch } from "react-redux";
 import { setCtx } from "../slices/lotideSlice";
 import { TappableList } from "../components/TappableList";
+import ContentDisplay from "../components/ContentDisplay";
+import RetryState from "../components/RetryState";
 
 export default function ProfileScreen({
   navigation,
@@ -19,40 +36,111 @@ export default function ProfileScreen({
   const [profile, setProfile] = useState<Profile>();
   const [communities, setCommunities] = useState<Community[]>([]);
   const [focusId, setFocusId] = useState(0);
+  const [profileLoadError, setProfileLoadError] = useState("");
+  const [hasLoadedProfile, setHasLoadedProfile] = useState(false);
   const theme = useTheme();
   const ctx = useLotideCtx();
   const dispatch = useDispatch();
 
   useEffect(
     () => navigation.addListener("focus", () => setFocusId(x => x + 1)),
-    [],
+    [navigation],
   );
 
   useEffect(() => {
     if (!ctx?.login) return;
     // TODO: Use the pagination feature
-    LotideService.getCommunities(ctx, true).then(communities =>
-      setCommunities(communities.items),
-    );
-  }, [ctx?.login?.user.id, focusId]);
+    LotideService.getCommunities(ctx, true)
+      .then(communities => {
+        setProfileLoadError("");
+        setCommunities(communities.items);
+      })
+      .catch(() => {
+        setCommunities([]);
+        setProfileLoadError("");
+      });
+  }, [ctx, focusId]);
 
   useEffect(() => {
-    if (ctx?.login !== undefined && ctx.login.user !== undefined) {
-      getUserData(ctx, ctx.login?.user.id || 0).then(setProfile);
+    if (!ctx?.login) return;
+
+    const userId = ctx.login.user?.id;
+    if (!userId) {
+      return;
     }
-  }, [ctx?.login?.token, focusId]);
+
+    getUserData(ctx, userId)
+      .then(profileData => {
+        setProfile(profileData);
+        setProfileLoadError("");
+      })
+      .catch(() => {
+        setProfileLoadError("Cannot load profile");
+        setProfile(undefined);
+      })
+      .finally(() => setHasLoadedProfile(true));
+  }, [ctx, focusId]);
 
   if (ctx?.login === undefined) {
     return <SuggestLogin />;
   }
 
-  if (!profile) return <Text>Cannot load profile</Text>;
+  const retryProfileLoad = () => {
+    setProfileLoadError("");
+    setHasLoadedProfile(false);
+    setFocusId(x => x + 1);
+  };
+
+  if (!ctx.login.user?.id) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <RetryState
+          message="Cannot load profile"
+          onRetry={retryProfileLoad}
+        />
+      </View>
+    );
+  }
+
+  if (profileLoadError) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <RetryState message={profileLoadError} onRetry={retryProfileLoad} />
+      </View>
+    );
+  }
+
+  if (!profile && hasLoadedProfile) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <RetryState
+          message="Cannot load profile"
+          onRetry={retryProfileLoad}
+        />
+      </View>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <Text style={styles.loadingText}>Loading profile</Text>
+      </View>
+    );
+  }
 
   function logout() {
     if (!ctx?.login) return;
+    const accountKey = ctx.login.user
+      ? `${ctx.login.user.username}@${ctx.apiUrl}`
+      : undefined;
+    const removeStoredAccount = () =>
+      accountKey
+        ? StorageService.lotideContextKV.remove(accountKey)
+        : Promise.resolve(undefined);
+
     if (Platform.OS === "web") {
-      StorageService.lotideContextKV
-        .remove(`${ctx.login?.user.username}@${ctx.apiUrl}`)
+      removeStoredAccount()
         .then(() => LotideService.logout(ctx))
         .then(() => dispatch(setCtx({})));
       return;
@@ -68,8 +156,7 @@ export default function ProfileScreen({
         {
           text: "Remove",
           onPress: () => {
-            StorageService.lotideContextKV
-              .remove(`${ctx.login?.user.username}@${ctx.apiUrl}`)
+            removeStoredAccount()
               .then(() => LotideService.logout(ctx))
               .then(() => dispatch(setCtx({})));
           },
@@ -87,17 +174,13 @@ export default function ProfileScreen({
     );
   }
 
-  function comingSoon() {
-    Alert.alert("Coming soon", "This feature isn't ready yet");
-  }
-
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: theme.background }]}
     >
       <View style={styles.header}>
         <View>
-          <ActorDisplay
+          <ActorDisplayComponent
             name={profile.username}
             host={profile.host}
             local={true}
@@ -107,11 +190,35 @@ export default function ProfileScreen({
             style={{ fontSize: 18 }}
           />
           {!!profile.avatar && <Text>{profile.avatar.url}</Text>}
-          {!!profile.description && <Text>{profile.description}</Text>}
+          {typeof profile.description === "string" ? (
+            <Text>{profile.description}</Text>
+          ) : (
+            profile.description && (
+              <ContentDisplay
+                contentHtml={profile.description?.content_html}
+                contentMarkdown={profile.description?.content_markdown}
+                contentText={profile.description?.content_text}
+              />
+            )
+          )}
         </View>
       </View>
       <TappableList
         items={[
+          {
+            title: "Your Activity",
+            icon: "reader-outline",
+            onPress: () =>
+              navigation.navigate("ProfileActivity", {
+                userId: profile.id || ctx.login?.user?.id,
+                username: profile.username,
+              }),
+          },
+          {
+            title: "Moderation",
+            icon: "shield-outline",
+            onPress: () => navigation.navigate("Moderation"),
+          },
           {
             title: "Switch Account",
             icon: "person-add-outline",
@@ -125,26 +232,7 @@ export default function ProfileScreen({
           {
             title: "App Settings",
             icon: "settings-outline",
-            disabled: true,
-            onPress: comingSoon,
-          },
-          {
-            title: "Edit Account",
-            icon: "pencil-outline",
-            disabled: true,
-            onPress: comingSoon,
-          },
-          {
-            title: "Your Posts / Comments",
-            icon: "newspaper-outline",
-            disabled: true,
-            onPress: comingSoon,
-          },
-          {
-            title: "Saved",
-            icon: "bookmark-outline",
-            disabled: true,
-            onPress: comingSoon,
+            onPress: () => navigation.navigate("Settings"),
           },
           {
             title: "New Community",
@@ -155,17 +243,6 @@ export default function ProfileScreen({
         style={{ marginHorizontal: 20 }}
       />
 
-      <TappableList
-        items={[
-          {
-            title: "Moderation",
-            icon: "shield-outline",
-            disabled: true,
-            onPress: comingSoon,
-          },
-        ]}
-        style={{ marginHorizontal: 20, marginTop: 20 }}
-      />
       <Text style={styles.followingTitle}>Communities You Follow:</Text>
       {communities.map(community => (
         <View
@@ -175,7 +252,7 @@ export default function ProfileScreen({
             { borderColor: theme.secondaryBackground },
           ]}
         >
-          <ActorDisplay
+          <ActorDisplayComponent
             name={community.name}
             host={community.host}
             local={community.local}
@@ -248,4 +325,9 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderBottomWidth: 1,
   },
+  loadingText: {
+    padding: 20,
+  },
 });
+
+/* end of ProfileScreen.tsx */

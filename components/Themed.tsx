@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: Themed.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 /**
  * Learn more about Light and Dark modes:
  * https://docs.expo.io/guides/color-schemes/
@@ -82,3 +97,6 @@ export const TextInput = forwardRef<
     />
   );
 });
+TextInput.displayName = "TextInput";
+
+/* end of Themed.tsx */

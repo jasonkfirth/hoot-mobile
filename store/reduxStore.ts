@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: reduxStore.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { configureStore } from "@reduxjs/toolkit";
 import postReducer from "../slices/postSlice";
 import lotideReducer from "../slices/lotideSlice";
@@ -17,3 +32,5 @@ export default store;
 export type RootState = ReturnType<typeof store.getState>;
 // Inferred type: {posts: PostsState, comments: CommentsState, users: UsersState}
 export type AppDispatch = typeof store.dispatch;
+
+/* end of reduxStore.ts */

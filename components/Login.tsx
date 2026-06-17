@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: Login.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useRef, useState } from "react";
 import {
   Alert,
@@ -15,6 +30,8 @@ import useTheme from "../hooks/useTheme";
 import { useNavigation } from "@react-navigation/core";
 import { useDispatch } from "react-redux";
 import { setCtx } from "../slices/lotideSlice";
+import { getErrorMessage } from "../utils/error";
+import { RootStackScreenProps } from "../types";
 
 export interface LoginProps {
   hostName?: string;
@@ -32,7 +49,7 @@ export default function Login(props: LoginProps) {
   const passwordRef = useRef<DefaultTextInput>(null);
   const theme = useTheme();
   const dispatch = useDispatch();
-  const navigation = useNavigation();
+  const navigation = useNavigation<RootStackScreenProps<"ForgotPassword">["navigation"]>();
 
   function fail(message: string) {
     Alert.alert("Failed to submit", message);
@@ -58,7 +75,7 @@ export default function Login(props: LoginProps) {
         );
       })
       .catch(e => {
-        Alert.alert("Failed to register", e);
+        Alert.alert("Failed to register", getErrorMessage(e));
         console.error(e);
       });
   }
@@ -81,7 +98,7 @@ export default function Login(props: LoginProps) {
         );
       })
       .catch(e => {
-        Alert.alert("Failed to login", e);
+        Alert.alert("Failed to login", getErrorMessage(e));
         console.error(e);
       });
   }
@@ -143,7 +160,7 @@ export default function Login(props: LoginProps) {
             onChangeText={setEmail}
             keyboardType="email-address"
             textContentType="emailAddress"
-            autoCompleteType="email"
+            autoComplete="email"
             returnKeyType="next"
             onSubmitEditing={() => usernameRef.current?.focus()}
           />
@@ -156,7 +173,7 @@ export default function Login(props: LoginProps) {
           onChangeText={setUsername}
           keyboardType="ascii-capable"
           textContentType="username"
-          autoCompleteType="username"
+          autoComplete="username"
           returnKeyType="next"
           onSubmitEditing={() => passwordRef.current?.focus()}
         />
@@ -168,7 +185,7 @@ export default function Login(props: LoginProps) {
           onChangeText={setPassword}
           secureTextEntry={true}
           textContentType={isRegistering ? "newPassword" : "password"}
-          autoCompleteType="password"
+          autoComplete="password"
           returnKeyType="done"
           onSubmitEditing={submit}
         />
@@ -176,7 +193,9 @@ export default function Login(props: LoginProps) {
           <Pressable
             style={{ padding: 15 }}
             onPress={() =>
-              navigation.navigate("ForgotPassword", { node: props.domain })
+              navigation.navigate("ForgotPassword", {
+                node: props.domain,
+              })
             }
           >
             <Text secondary>Forgot Password</Text>
@@ -229,3 +248,5 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
   },
 });
+
+/* end of Login.tsx */

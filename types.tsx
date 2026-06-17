@@ -12,6 +12,8 @@ import { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 declare global {
   namespace ReactNavigation {
+    // React Navigation uses this empty interface for global route merging.
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     interface RootParamList extends RootStackParamList {}
   }
 }
@@ -21,7 +23,6 @@ export type RootStackParamList = {
   Modal: { postId: PostId; highlightedComments?: CommentId[] };
   Post: { postId: PostId; highlightedComments?: CommentId[] };
   NotFound: undefined;
-  Web: undefined;
   Comment: {
     id: number;
     title?: string;
@@ -29,18 +30,21 @@ export type RootStackParamList = {
     type: "post" | "comment";
   };
   Settings: undefined;
-  Register: undefined;
-  Community: { community: Community };
+  Community: {
+    community?: Community | { id: CommunityId };
+    id?: CommunityId | string;
+  };
   NewCommunity: undefined;
   EditCommunity: { community: Community };
   ForgotPassword: { node: string };
+  ProfileActivity: { userId?: UserId; username?: string };
+  Moderation: undefined;
 
   FeedScreen: { sort: SortOption };
   SearchScreen: undefined;
   NewPostScreen: { community?: Community };
   NotificationScreen: undefined;
   ProfileScreen: undefined;
-  RegisterScreen: undefined;
 };
 
 export type RootStackScreenProps<Screen extends keyof RootStackParamList> =
@@ -55,7 +59,6 @@ export type RootTabParamList = {
   NewPostScreen: { community?: Community };
   NotificationScreen: undefined;
   ProfileScreen: undefined;
-  RegisterScreen: undefined;
 };
 
 export type RootTabScreenProps<Screen extends keyof RootTabParamList> =

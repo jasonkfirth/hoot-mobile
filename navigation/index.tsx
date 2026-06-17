@@ -1,31 +1,44 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: index.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 /**
  * If you are not familiar with React Navigation, refer to the "Fundamentals" guide:
  * https://reactnavigation.org/docs/getting-started
  *
  */
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import Icon from "@expo/vector-icons/Ionicons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
-  NavigationContainer,
   DefaultTheme,
   DarkTheme,
+  NavigationContainer,
 } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import {
   ActionSheetIOS,
-  ColorSchemeName,
   Platform,
   Pressable,
   useWindowDimensions,
 } from "react-native";
 
 import Colors from "../constants/Colors";
-import useColorScheme from "../hooks/useColorScheme";
+import useColorScheme, { AppColorScheme } from "../hooks/useColorScheme";
 import {
   RootStackParamList,
   RootTabParamList,
-  RootTabScreenProps,
 } from "../types";
 import LinkingConfiguration from "./LinkingConfiguration";
 
@@ -42,18 +55,33 @@ import NotificationScreen from "../screens/NotificationScreen";
 import NewCommunityScreen from "../screens/NewCommunity";
 import ForgotPasswordScreen from "../screens/ForgotPasswordScreen";
 import EditCommunityScreen from "../screens/EditCommunityScreen";
+import ProfileActivityScreen from "../screens/ProfileActivityScreen";
+import ModerationScreen from "../screens/ModerationScreen";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import { createDrawerNavigator } from "@react-navigation/drawer";
 
 export default function Navigation({
   colorScheme,
 }: {
-  colorScheme: ColorSchemeName;
+  colorScheme: AppColorScheme;
 }) {
+  const navigationTheme = {
+    ...(colorScheme === "dark" ? DarkTheme : DefaultTheme),
+    colors: {
+      ...(colorScheme === "dark" ? DarkTheme.colors : DefaultTheme.colors),
+      primary: Colors[colorScheme].tint,
+      background: Colors[colorScheme].background,
+      card: Colors[colorScheme].tabBar,
+      text: Colors[colorScheme].text,
+      border: Colors[colorScheme].tertiaryBackground,
+      notification: Colors[colorScheme].tint,
+    },
+  };
+
   return (
     <NavigationContainer
       linking={LinkingConfiguration}
-      theme={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+      theme={navigationTheme}
     >
       <RootNavigator />
     </NavigationContainer>
@@ -77,12 +105,25 @@ function RootNavigator() {
         }
         options={{ headerShown: false }}
       />
-      <Stack.Screen name="Web" component={ModalScreen} />
       <Stack.Screen name="Post" component={ModalScreen} />
       <Stack.Screen name="Comment" component={CommentScreen} />
       <Stack.Screen name="Community" component={CommunityScreen} />
       <Stack.Screen name="NewCommunity" component={NewCommunityScreen} />
       <Stack.Screen name="EditCommunity" component={EditCommunityScreen} />
+      <Stack.Screen
+        name="ProfileActivity"
+        component={ProfileActivityScreen}
+        options={({ route }) => ({
+          title: route.params?.username
+            ? `${route.params.username}'s Activity`
+            : "Activity",
+        })}
+      />
+      <Stack.Screen
+        name="Moderation"
+        component={ModerationScreen}
+        options={{ title: "Moderation" }}
+      />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen
         name="ForgotPassword"
@@ -111,64 +152,70 @@ function BottomTabNavigator({ navigation }: any) {
   const [sort, setSort] = useState<SortOption>("hot");
   const ctx = useLotideCtx();
   const colorScheme = useColorScheme();
+  const supportsTop = (ctx?.apiVersion || 0) >= 10;
+  const safeSort: SortOption = supportsTop ? sort : "hot";
 
-  useEffect(() => {
-    if ((ctx?.apiVersion || 0) < 10 && sort == "top") {
-      setSort("hot");
-      navigation.navigate("FeedScreen", { sort: "hot" });
-    }
-  }, [ctx?.apiVersion]);
+  const sortMenu = [
+    safeSort,
+    "hot",
+    "new",
+    ...(supportsTop ? (["top"] as SortOption[]) : []),
+  ].filter(
+    (value, i, arr): value is SortOption => arr.indexOf(value) === i,
+  );
+
+  const changeSort = (requestedSort: SortOption) => {
+    const nextSort = !supportsTop && requestedSort === "top" ? "hot" : requestedSort;
+    setSort(nextSort);
+    navigation.navigate("FeedScreen", { sort: nextSort });
+  };
 
   return (
     <BottomTab.Navigator
       initialRouteName="FeedScreen"
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme].tint as unknown as string,
+        tabBarActiveTintColor: Colors[colorScheme].tint,
         tabBarShowLabel: false,
       }}
     >
       <BottomTab.Screen
         name="FeedScreen"
         component={FeedScreen}
-        initialParams={{ sort }}
-        options={({ navigation }: RootTabScreenProps<"FeedScreen">) => ({
-          title: "Hoot",
-          tabBarIcon: ({ color }) => (
-            <TabBarIcon name="newspaper-outline" color={color} />
-          ),
-          headerRight: () => (
+        initialParams={{ sort: safeSort }}
+          options={({ navigation }) => ({
+            title: "Hoot",
+            tabBarIcon: ({ color }) => (
+              <TabBarIcon name="newspaper-outline" color={color} />
+            ),
+            headerRight: () => (
             <Pressable
-              onPress={() => {
-                console.log(ctx);
-                if (Platform.OS == "ios") {
- 		   ActionSheetIOS.showActionSheetWithOptions(
+                onPress={() => {
+                  if (Platform.OS === "ios") {
+                    ActionSheetIOS.showActionSheetWithOptions(
                     {
                       options: [
                         "Cancel",
-                        "Hot",
-                        "New",
-                        (ctx?.apiVersion || 0) >= 10 ? "Top" : "",
-                      ].filter(x => !!x),
+                        ...sortMenu.map(value => value.replace("top", "Top")),
+                      ],
                       title: "Sort by:",
                       cancelButtonIndex: 0,
                     },
                     buttonIndex => {
-                      const newSort = [sort, "hot", "new", "top"][
-                        buttonIndex
-                      ] as SortOption;
-                      setSort(newSort);
-                      navigation.navigate("FeedScreen", { sort: newSort });
+                      const buttonSelected = buttonIndex - 1;
+                      const newSort = sortMenu[buttonSelected];
+                      if (!newSort) return;
+                      changeSort(newSort);
                     },
                   );
                 } else {
                   const sortSwitch: { [key: string]: SortOption } = {
-                    top: "hot",
                     hot: "new",
-                    new: (ctx?.apiVersion || 0) < 10 ? "hot" : "top",
+                    new: supportsTop ? "top" : "hot",
                   };
-                  const newSort: SortOption = sortSwitch[sort];
-                  setSort(newSort);
-                  navigation.navigate("FeedScreen", { sort: newSort });
+                  const newSort = sortSwitch[safeSort];
+                  if (newSort) {
+                    changeSort(newSort);
+                  }
                 }
               }}
               style={({ pressed }) => ({
@@ -181,15 +228,25 @@ function BottomTabNavigator({ navigation }: any) {
                     hot: "flame-outline",
                     new: "time-outline",
                     top: "trophy-outline",
-                  }[sort] as any
+                  }[safeSort] as any
                 }
                 size={25}
                 color={Colors[colorScheme].tint}
                 style={{ marginRight: 15 }}
               />
-            </Pressable>
+          </Pressable>
           ),
         })}
+      />
+      <BottomTab.Screen
+        name="SearchScreen"
+        component={SearchScreen}
+        options={{
+          title: "Communities",
+          tabBarIcon: ({ color }) => (
+            <TabBarIcon name="search-outline" color={color} />
+          ),
+        }}
       />
       <BottomTab.Screen
         name="NewPostScreen"
@@ -212,6 +269,16 @@ function BottomTabNavigator({ navigation }: any) {
           ),
         }}
       />
+      <BottomTab.Screen
+        name="ProfileScreen"
+        component={ProfileScreen}
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color }) => (
+            <TabBarIcon name="person-circle-outline" color={color} />
+          ),
+        }}
+      />
     </BottomTab.Navigator>
   );
 }
@@ -227,7 +294,8 @@ function DrawerNavigator({ navigation }: any) {
     <Drawer.Navigator
       initialRouteName="FeedScreen"
       screenOptions={{
-        drawerActiveTintColor: "orange",
+        drawerActiveTintColor: Colors[colorScheme].tint,
+        drawerInactiveTintColor: Colors[colorScheme].text,
         drawerType: "permanent",
       }}
     >
@@ -235,7 +303,7 @@ function DrawerNavigator({ navigation }: any) {
         name="FeedScreen"
         component={FeedScreen}
         initialParams={{ sort }}
-        options={({ navigation }: RootTabScreenProps<"FeedScreen">) => ({
+        options={({ navigation }) => ({
           title: "Hoot",
           drawerIcon: ({ color }) => (
             <TabBarIcon name="newspaper-outline" color={color} />
@@ -355,3 +423,5 @@ function TabBarIcon(props: {
     />
   );
 }
+
+/* end of index.tsx */

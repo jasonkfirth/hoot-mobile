@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: SuggestLogin.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useState } from "react";
 import { StyleSheet } from "react-native";
 import { View } from "./Themed";
@@ -54,3 +69,5 @@ const styles = StyleSheet.create({
     width: "100%",
   },
 });
+
+/* end of SuggestLogin.tsx */

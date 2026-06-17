@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: useVote.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { useDispatch } from "react-redux";
 import { setPostVote } from "../slices/postSlice";
 import { AppDispatch } from "../store/reduxStore";
@@ -11,7 +26,7 @@ export default function useVote(type: ContentType, content: Post | Comment) {
   const ctx = useLotideCtx();
 
   function dispatchVote(vote: boolean) {
-    if (type == "post") {
+    if (type === "post") {
       dispatch(setPostVote({ id: content.id, vote }));
     } else {
       dispatch(setCommentVote({ id: content.id, vote }));
@@ -20,7 +35,7 @@ export default function useVote(type: ContentType, content: Post | Comment) {
 
   function addVote() {
     if (!ctx?.login) return;
-    if (type == "post") {
+    if (type === "post") {
       LotideService.applyVote(ctx, content.id).then(() => dispatchVote(true));
     } else {
       LotideService.applyCommentVote(ctx, content.id).then(() =>
@@ -31,7 +46,7 @@ export default function useVote(type: ContentType, content: Post | Comment) {
 
   function removeVote() {
     if (!ctx?.login) return;
-    if (type == "post") {
+    if (type === "post") {
       LotideService.removeVote(ctx, content.id).then(() => dispatchVote(false));
     } else {
       LotideService.removeCommentVote(ctx, content.id).then(() =>
@@ -46,3 +61,5 @@ export default function useVote(type: ContentType, content: Post | Comment) {
     removeVote,
   };
 }
+
+/* end of useVote.ts */

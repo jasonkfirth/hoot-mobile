@@ -1,8 +1,23 @@
-import React, { useEffect, useState } from "react";
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: HostList.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import React, { useCallback, useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet } from "react-native";
 import Icon from "@expo/vector-icons/Ionicons";
 import KnownHosts from "../constants/KnownHosts";
-import ActorDisplay from "./ActorDisplay";
+import ActorDisplayComponent from "./ActorDisplay";
 import { Text, TextInput, View } from "./Themed";
 import * as LotideService from "../services/LotideService";
 import useTheme from "../hooks/useTheme";
@@ -10,6 +25,7 @@ import { lotideContextKV } from "../services/StorageService";
 import { setCtx } from "../slices/lotideSlice";
 import { useDispatch } from "react-redux";
 import ContentDisplay from "./ContentDisplay";
+import RetryState from "./RetryState";
 
 export interface HostListProps {
   onSelect: (domain: string, name?: string, username?: string) => void;
@@ -30,31 +46,41 @@ export default function HostList(props: HostListProps) {
   const theme = useTheme();
   const dispatch = useDispatch();
 
-  useEffect(() => {
-    KnownHosts.map((h, i) => {
-      return LotideService.getInstanceInfo({
-        apiUrl: `https://${h.domain}/api/unstable`,
+  const loadKnownHostInfo = useCallback((host: HostData, index: number) => {
+    LotideService.getInstanceInfo({
+      apiUrl: `https://${host.domain}/api/unstable`,
+    })
+      .then(instanceInfo => {
+        setKnowHosts(hosts =>
+          hosts.map((hostData, hostIndex) =>
+            index !== hostIndex
+              ? hostData
+              : {
+                name: hostData.name,
+                domain: hostData.domain,
+                instanceInfo,
+              },
+          ),
+        );
       })
-        .then(d => {
-          setKnowHosts(hosts =>
-            hosts.map((h2, j) =>
-              i !== j
-                ? h2
-                : { name: h2.name, domain: h2.domain, instanceInfo: d },
-            ),
-          );
-        })
-        .catch(() => {
-          setKnowHosts(hosts =>
-            hosts.map((h2, j) =>
-              i !== j
-                ? h2
-                : { name: h2.name, domain: h2.domain, instanceInfo: null },
-            ),
-          );
-        });
-    });
+      .catch(() => {
+        setKnowHosts(hosts =>
+          hosts.map((hostData, hostIndex) =>
+            index !== hostIndex
+              ? hostData
+              : {
+                name: hostData.name,
+                domain: hostData.domain,
+                instanceInfo: null,
+              },
+          ),
+        );
+      });
   }, []);
+
+  useEffect(() => {
+    KnownHosts.forEach(loadKnownHostInfo);
+  }, [loadKnownHostInfo]);
 
   useEffect(() => {
     lotideContextKV
@@ -63,7 +89,7 @@ export default function HostList(props: HostListProps) {
       .then(setExistingProfiles);
   }, []);
 
-  const renderItem = ({ item }: { item: HostData }) => {
+  const renderItem = ({ item, index }: { item: HostData; index: number }) => {
     const enabled = (item.instanceInfo?.apiVersion || 0) > 8;
     const color = enabled ? theme.text : theme.secondaryText;
     const description = item.instanceInfo?.description;
@@ -76,9 +102,13 @@ export default function HostList(props: HostListProps) {
         }}
       >
         <Pressable
-          onPress={() => enabled && props.onSelect(item.domain, item.name)}
+          accessibilityLabel={`Select host ${item.name}`}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !enabled }}
+          disabled={!enabled}
+          onPress={() => props.onSelect(item.domain, item.name)}
         >
-          <ActorDisplay
+          <ActorDisplayComponent
             name={item.name}
             host={item.domain}
             local={false}
@@ -108,12 +138,19 @@ export default function HostList(props: HostListProps) {
                   />
                 ))}
             </>
-          ) : item.instanceInfo === null ? (
-            <Text style={{ color }}>Failed to load info</Text>
-          ) : (
+          ) : item.instanceInfo === null ? null : (
             <Text style={{ color }}>Loading...</Text>
           )}
         </Pressable>
+        {item.instanceInfo === null ? (
+          <RetryState
+            compact
+            actionLabel="Retry host"
+            message="Failed to load info"
+            onRetry={() => loadKnownHostInfo(item, index)}
+            style={styles.hostRetry}
+          />
+        ) : null}
       </View>
     );
   };
@@ -131,10 +168,12 @@ export default function HostList(props: HostListProps) {
           .replace("http://", "")
           .replace("https://", "")
           .split(/[/?#]/)[0];
-        const hostName = KnownHosts.find(x => x.domain == host)?.name;
+        const hostName = KnownHosts.find(x => x.domain === host)?.name;
         return (
           <Pressable
             key={p[0]}
+            accessibilityLabel={`Select profile ${username}@${host}`}
+            accessibilityRole="button"
             onPress={() => {
               if (isUnlocked) {
                 dispatch(setCtx(p[1]));
@@ -154,7 +193,7 @@ export default function HostList(props: HostListProps) {
               style={{ marginRight: 10 }}
               size={20}
             />
-            <ActorDisplay
+            <ActorDisplayComponent
               name={username}
               host={host}
               local={true}
@@ -178,7 +217,7 @@ export default function HostList(props: HostListProps) {
       })}
       <Text style={styles.subtitle}>
         {existingProfiles.length > 0
-          ? "Or sign into a new acount"
+          ? "Or sign into a new account"
           : "Enter a host or select one below"}
       </Text>
       <TextInput
@@ -197,8 +236,8 @@ export default function HostList(props: HostListProps) {
             x.domain.includes(hostText.toLowerCase()) ||
             x.name.toLowerCase().includes(hostText.toLowerCase()),
         )
-        .map(item => (
-          <View key={item.domain}>{renderItem({ item })}</View>
+        .map((item, index) => (
+          <View key={item.domain}>{renderItem({ item, index })}</View>
         ))}
     </ScrollView>
   );
@@ -219,4 +258,9 @@ const styles = StyleSheet.create({
     marginTop: 15,
     textAlign: "center",
   },
+  hostRetry: {
+    marginTop: 10,
+  },
 });
+
+/* end of HostList.tsx */

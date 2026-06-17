@@ -1,4 +1,51 @@
-import { lotideRequest } from "./util";
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: User.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import { lotideRequest, readJson } from "./util";
+import {
+  normalizePaged,
+  normalizeUserThing,
+} from "./validation";
+
+export type UserThing =
+  | {
+      type: "post";
+      id: PostId;
+      title: string;
+      author?: Profile;
+      community?: Community;
+      created?: string;
+      replies_count_total?: number;
+      remote_url?: string;
+      sticky?: boolean;
+    }
+  | {
+      type: "comment";
+      id: CommentId;
+      content_text?: string | null;
+      content_html?: string | null;
+      created?: string;
+      post: {
+        id: PostId;
+        title: string;
+        remote_url?: string;
+        sensitive?: boolean;
+      };
+      remote_url?: string;
+      sensitive?: boolean;
+    };
 
 export async function login(
   apiUrl: string,
@@ -11,7 +58,9 @@ export async function login(
     "logins",
     { username, password },
     true,
-  ).then(data => data.json());
+  )
+    .then(readJson)
+    .then(data => data as Login);
 }
 
 export async function register(
@@ -31,7 +80,9 @@ export async function register(
       login: true,
     },
     true,
-  ).then(data => data.json());
+  )
+    .then(readJson)
+    .then(data => data as Login);
 }
 
 export async function logout(ctx: LotideContext) {
@@ -76,3 +127,21 @@ export async function forgotPasswordReset(
     true,
   );
 }
+
+export async function getUserThings(
+  ctx: LotideContext,
+  userId: UserId,
+  page?: string,
+): Promise<Paged<UserThing>> {
+  return lotideRequest(
+    ctx,
+    "GET",
+    `users/${userId}/things${page ? `?page=${encodeURIComponent(page)}` : ""}`,
+    undefined,
+    true,
+  )
+    .then(readJson)
+    .then(data => normalizePaged(data, normalizeUserThing, "user things"));
+}
+
+/* end of User.ts */

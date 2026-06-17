@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: TappableList.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React from "react";
 import {
   Pressable,
@@ -36,7 +51,15 @@ export function TappableList(props: TappableListProps) {
       ]}
     >
       {props.items.map((item, i) => (
-        <Pressable key={i} style={[styles.item]} onPress={item.onPress}>
+        <Pressable
+          key={i}
+          accessibilityLabel={item.title}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: item.disabled || false }}
+          style={[styles.item]}
+          onPress={item.onPress}
+          disabled={item.disabled}
+        >
           <Icon
             name={item.icon || "help-outline"}
             size={20}
@@ -95,3 +118,5 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
 });
+
+/* end of TappableList.tsx */

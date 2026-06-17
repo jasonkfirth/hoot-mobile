@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: HrefDisplay.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useState } from "react";
 import { Platform, Pressable, StyleSheet, ImageBackground } from "react-native";
 import Icon from "@expo/vector-icons/Ionicons";
@@ -52,7 +67,7 @@ export default function HrefDisplay({ href }: { href: string }) {
               <Icon
                 name="play-outline"
                 size={70}
-                color={"#fffa"}
+                color="#ffffffaa"
                 style={styles.playIcon}
               />
             </Pressable>
@@ -81,24 +96,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     borderRadius: 5,
     marginHorizontal: 15,
-    ...(Platform.OS == "web" ? { cursor: "pointer" } : {}),
+    ...(Platform.OS === "web" ? { cursor: "pointer" } : {}),
   },
   wideLink: {
     marginHorizontal: 0,
     borderRadius: 0,
   },
   image: {
-    height: Platform.OS == "web" ? 400 : undefined,
+    height: Platform.OS === "web" ? 400 : undefined,
     resizeMode: "contain",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
   },
   playIcon:
-    Platform.OS == "web"
+    Platform.OS === "web"
       ? {}
       : {
-          shadowColor: "black",
+          shadowColor: "#000000",
           shadowOpacity: 1,
           shadowRadius: 5,
           shadowOffset: {
@@ -107,3 +122,5 @@ const styles = StyleSheet.create({
           },
         },
 });
+
+/* end of HrefDisplay.tsx */

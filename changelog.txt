@@ -1,0 +1,320 @@
+Hoot Mobile Changelog
+=====================
+
+Version 0.2.0
+-------------
+
+Date: 2026-06-17
+
+Overview:
+
+  * Advanced the app from the previous GitHub state at commit 04a0bdf
+    ("Removed non-functional navigation buttons so the app works without
+    crashing") to a modernized Expo SDK 56 / React Native 0.85 app.
+
+  * Updated app.json from version 0.1.2 to 0.2.0 and added the Expo plugin
+    declarations required by the current native modules.
+
+  * Added package-lock.json so the upgraded npm dependency graph is recorded
+    reproducibly.
+
+  * Added file headers, section banners, and end-of-file markers across the
+    TypeScript and TSX source files touched by this pass.
+
+Lotide API compatibility:
+
+  * Matched community browsing to the current Lotide server behavior:
+    list requests now use the community scopes, accepted-follow filtering,
+    authenticated include_your data, alphabetic sorting, and server pagination
+    forms used by the real handler.
+
+  * Updated community follow handling to match Lotide's response body.
+    Follow requests now wait briefly for remote acceptance and validate the
+    returned accepted flag instead of assuming success from an empty response.
+
+  * Changed community editing to send description_markdown, which is the field
+    accepted by the Lotide community PATCH endpoint.
+
+  * Fixed community description editing when the server returns a structured
+    content object. The edit screen now starts from markdown, then text, then
+    HTML content, instead of passing the content object directly to the text
+    input.
+
+  * Adjusted follow feedback so a false accepted value is treated as "not
+    accepted yet" rather than a hard rejection.
+
+  * Updated post listing requests to include current aggregate filter behavior,
+    optional authenticated include_your data, encoded page tokens, community
+    filters, and sticky sorting for community hot feeds.
+
+  * Updated post and comment reply requests to use the current include_your,
+    sort, pagination, and response-normalization behavior.
+
+  * Updated post, comment, community, and reply creation to validate returned
+    ids before the app stores or navigates to the new resource.
+
+  * Added Lotide user activity support through the users/:id/things endpoint.
+
+  * Added moderation support for moderated-community lists, pending community
+    flags, and community flag dismissal.
+
+Response handling and validation:
+
+  * Added services/LotideService/validation.ts to normalize untrusted Lotide
+    payloads before UI code consumes them.
+
+  * Made instance metadata loading tolerant of older or incomplete server
+    software fields while preserving the parsed API version used elsewhere in
+    the app.
+
+  * Normalized current Lotide community fields, including your_follow,
+    federation status, discovery metadata, latest unfollow status, visibility
+    suppression, last post summaries, remote post counts, and pending
+    moderation action counts.
+
+  * Normalized post and comment fields supplied by the server, including
+    remote_url, content_markdown, sensitive flags, comment attachments,
+    comment deletion state, and federation status.
+
+  * Kept typed Lotide notifications and user activity records aligned with the
+    server's serialized response enums, including user follow notifications.
+
+  * Added a shared utility for converting unknown thrown values into user-safe
+    alert messages.
+
+Notification reliability:
+
+  * Added Android local notification support with expo-notifications.
+
+  * Replaced the deprecated expo-background-fetch scheduler with the current
+    expo-background-task API for local notification polling.
+
+  * Added services/LotideNotificationPoller.ts to register the background task,
+    manage the Android notification channel, request notification permission,
+    store the per-account notification baseline, and surface new notifications
+    as local alerts.
+
+  * Changed phone notification dedupe to use Hoot's own per-account local
+    notification baseline instead of relying only on Lotide's global unseen
+    flag. This lets Hoot notify for a phone-new notification even if Hitide or
+    another client already fetched the notifications endpoint first.
+
+  * Added notification poller tests covering enable-time baselining,
+    cross-client unseen clearing, and first-run old-history suppression.
+
+  * Added an Android-only settings toggle for background notifications and
+    updated the settings text to describe OS-controlled background checks
+    rather than promising a fixed polling interval.
+
+  * Remaining limitation: this is still local polling. If the app is
+    user-force-killed, Android and iOS may not run background tasks. True
+    killed-app delivery still needs server push support; Lotide's current
+    notification subscription endpoint is a compatibility stub.
+
+Navigation, screens, and flows:
+
+  * Updated React Navigation usage for the current v7 packages, including
+    typed route params, typed navigation calls, and a navigation theme derived
+    from the app color tokens.
+
+  * Replaced the old placeholder linking map with Hoot routes for feeds,
+    search, new posts, notifications, profile, posts, comments, communities,
+    profile activity, moderation, settings, and not-found fallback paths.
+
+  * Added ProfileActivityScreen.tsx to display the user's mixed post and
+    comment activity from Lotide, including pagination and navigation back to
+    related posts.
+
+  * Added ModerationScreen.tsx to show moderated communities, pending flags,
+    flagged posts, flagger information, and flag dismissal.
+
+  * Reworked ProfileScreen to load profile data defensively, render structured
+    profile descriptions, link to activity/moderation/settings, and handle
+    logout when the stored login user record is missing.
+
+  * Reworked SearchScreen and CommunityFinder so community browsing has Mine
+    and Everything tabs backed by the current Lotide community list API.
+
+  * Restored dev.narwhal.city to the seeded login host list after checking the
+    old GitHub host list against live Lotide instance endpoints.
+
+  * Reworked CommunityScreen so it can load a community by id from deep links,
+    render structured descriptions, refresh community metadata, and show retry
+    states for community or feed failures.
+
+  * Reworked FeedScreen, ModalScreen, PostDisplay, and CommentsDisplay to show
+    explicit retry/loading states instead of failing silently or crashing when
+    posts, comments, authors, or communities are missing.
+
+  * Reworked NotificationScreen to handle reply notifications, user-follow
+    notifications, empty states, fetch failures, and navigation to highlighted
+    replies.
+
+  * Reworked SettingsScreen to remove the deprecated react-native-settings-screen
+    dependency and provide an in-app settings UI for the Lotide API URL, static
+    feed-sort display, and Android notification toggle.
+
+  * Updated NewPostScreen, NewCommunity, EditCommunityScreen, and
+    ForgotPasswordScreen for current React Native props, better error messages,
+    and safer navigation after successful requests.
+
+Rendering, theme, and UI behavior:
+
+  * Replaced react-native-htmlview with react-native-render-html. The old
+    package was already at its latest version but still pulled deprecated React
+    Native prop-type shims; the new renderer uses the current source,
+    renderersProps, ignoredDomTags, and contentWidth APIs.
+
+  * Reworked ContentDisplay to choose HTML, markdown-derived text, or plain
+    text safely, truncate previews before rendering, support current custom
+    renderers for abbr/details/img, ignore unsafe tags, and open links through
+    React Native Linking.
+
+  * Added RetryState.tsx as the shared accessible retry component used by
+    feeds, comments, posts, notifications, profiles, moderation, host loading,
+    and community loading.
+
+  * Reworked the color system into explicit typed light/dark palettes and
+    switched the dark theme to true black with app-controlled tab-bar colors.
+
+  * Updated components for safer optional data handling, including unknown
+    authors, unknown communities, missing login users, disabled navigation
+    targets, and API load failures.
+
+  * Added accessibility labels, roles, selected/disabled states, and clearer
+    press handling to tabs, host/profile selectors, post/community links, and
+    retry actions.
+
+  * Updated SwipeAction, Hoverable, HoverHighlight, TappableList, VoteCounter,
+    HrefDisplay, ElapsedTime, StyledText, SuggestLogin, and Themed for the
+    stricter current React Native and TypeScript surface.
+
+Dependency and tooling modernization:
+
+  * Upgraded direct dependencies to current npm registry versions where the
+    validation suite permits it, including TypeScript 6, current React
+    Navigation packages, ESLint 10, Redux Toolkit 2.12, styled-components
+    6.4, and the newest Expo 56 module releases.
+
+  * Held the native React Native toolchain on Expo 56's current compatibility
+    matrix after the Android release build proved the newer registry versions
+    were not all compatible together. The app now uses React 19.2.3, React
+    Native 0.85.3, Reanimated 4.3.1, Worklets 0.8.3, and Jest 29.7.
+
+  * Held Babel on the newest 7.x release line. Babel 8.0.1 is current on npm,
+    but the release Metro bundle failed because react-native-worklets still
+    loads Babel 7-only preset code.
+
+  * Removed @expo/webpack-config, @npmcli/fs, react-native-htmlview,
+    @types/react-native-htmlview, @types/react-native, and
+    react-native-settings-screen.
+
+  * Added expo-background-task, expo-notifications, expo-system-ui,
+    expo-task-manager, react-native-render-html, react-native-worklets,
+    @react-native/jest-preset, @testing-library/react-native, ESLint, Jest
+    environment packages, redux-mock-store, and current Node/Jest/React types.
+
+  * Updated scripts so npm run android and npm run ios use expo run:* native
+    builds, npm test runs Jest once by default, npm run test:watch keeps the
+    old watch behavior, npm run lint runs ESLint with zero warnings, and
+    npm run build:android invokes the Debian Android build script.
+
+  * Moved Jest configuration out of package.json into jest.config.js and added
+    jest.setup.js with current Expo, React Native, AsyncStorage, and navigation
+    test mocks.
+
+  * Added metro.config.js for the current Expo/Metro setup.
+
+  * Added eslint.config.js for the ESLint 10 flat-config path, including the
+    compatibility filtering required by Expo's current config.
+
+  * Added scripts/check-text-hygiene.js and wired npm run lint:strict to run
+    ESLint with unused-disable checks, text hygiene checks for Git-visible
+    tracked and untracked files, and TypeScript no-emit validation.
+
+  * Added shared ambient Lotide API types and TypeScript configuration so the
+    app code, tests, Jest globals, and React Native runtime types validate
+    together without the old global Comment collision.
+
+  * Added npm overrides for uuid, babel-plugin-istanbul,
+    eslint-import-resolver-typescript, glob, js-yaml, and jsdom so validation
+    and audit use current fixed packages instead of npm's downgrade path.
+
+Native Android and build outputs:
+
+  * Added the generated Android native project for package org.brokenlamp.hoot,
+    including Gradle wrapper files, Kotlin MainActivity/MainApplication,
+    Android manifests, ProGuard rules, splash assets, launcher icons, colors,
+    strings, and styles.
+
+  * Added build_scripts/debian-build-hoot-mobile-android.sh and
+    build_scripts/debian-test-hoot-mobile-android.sh for reproducible Debian
+    Android build/test validation.
+
+  * Added .gitignore rules for Android native build output:
+    android/.gradle, android/build, android/app/build, and android/**/.cxx.
+
+  * Added .vscode/settings.json to keep Java/Gradle build-configuration
+    updates interactive in VS Code.
+
+  * Added generated web distribution files under dist, including index.html,
+    metadata.json, CNAME, favicon.ico, and the bundled SpaceMono font asset.
+
+Assets and app metadata:
+
+  * Replaced the Expo app image assets for adaptive icon, favicon, launcher
+    icon, and splash image.
+
+  * Enabled Metro for the web bundler in app.json.
+
+  * Kept the Expo/EAS project id and Android package id attached to the app
+    metadata.
+
+Deleted obsolete files:
+
+  * Removed babel.config.js after moving the active Babel/Jest behavior into
+    the current Expo/Metro/Jest configuration path.
+
+  * Removed the old JavaScript StyledText smoke test after replacing it with
+    the current TypeScript/React Native test coverage.
+
+  * Removed constants/Layout.ts because the current UI code no longer uses the
+    old static layout helper.
+
+  * Removed global.d.ts after replacing it with types.d.ts and the expanded
+    shared Lotide API type declarations.
+
+  * Removed patches/react-native-htmlview+0.16.0.patch because the old HTML
+    renderer dependency was replaced.
+
+  * Removed transformers/NotificationTransformer.ts after notification
+    normalization moved into services/LotideService/Notification.ts.
+
+Tests and validation:
+
+  * Added and updated Lotide service tests for community lists, follow
+    responses, community edit payloads, posts, comments, user activity,
+    notifications, instance metadata, utility request handling, and runtime
+    response normalization.
+
+  * Added component, hook, screen, and notification-poller tests covering
+    CommunityFinder, HostList, PostDisplay, RetryState, TappableList,
+    useRefreshableData, CommunityScreen, ModerationScreen, NewPostScreen,
+    NotificationScreen, ProfileActivityScreen, ProfileScreen, SearchScreen,
+    and LotideNotificationPoller.
+
+  * Verified the current dependency and validation state:
+    npx expo install --check reports the Expo SDK 56 package set is current,
+    npm audit reports zero vulnerabilities, npm run lint passes,
+    npx tsc --noEmit passes, npm test passes 21 suites and 102 tests, and
+    the Android release APK build completes successfully.
+
+Compatibility note:
+
+  * npm outdated still reports newer registry releases for Babel 8, React
+    19.2.7, React Native 0.86, Reanimated 4.4, Worklets 0.9, Jest 30, and
+    related packages. Those are intentionally not the wanted versions right
+    now because Expo 56 and the Android release build require the compatible
+    package set above.
+
+end of changelog.txt

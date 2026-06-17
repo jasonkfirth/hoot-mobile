@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: CommunityFinder.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useEffect, useState } from "react";
 import {
   FlatList,
@@ -9,13 +24,15 @@ import {
 } from "react-native";
 import Icon from "@expo/vector-icons/Ionicons";
 import * as LotideService from "../services/LotideService";
-import ActorDisplay from "./ActorDisplay";
+import ActorDisplayComponent from "./ActorDisplay";
+import ContentDisplay from "./ContentDisplay";
 import useTheme from "../hooks/useTheme";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 
 export interface CommunityFinderProps {
   placeholder?: string;
   onlyWhenTyping?: boolean;
+  onlyFollowing?: boolean;
   focusId?: number;
   onSelect: (community: Community) => void;
 }
@@ -37,12 +54,32 @@ export default function CommunityFinder(props: CommunityFinderProps) {
 
   useEffect(() => {
     if (!ctx) return;
-    LotideService.getCommunities(ctx, false).then(setCommunities);
-  }, [ctx?.login?.token, props.focusId]);
+    LotideService.getCommunities(ctx, props.onlyFollowing || false)
+      .then(setCommunities)
+      .catch(() => {
+        setCommunities({
+          items: [],
+          next_page: null,
+        });
+      });
+  }, [ctx, props.focusId, props.onlyFollowing]);
 
   const renderItem = ({ item }: { item: Community }) => {
+    const description = item.description;
+    const descriptionText = typeof description === "string" ? description : "";
+    const descriptionMarkdown =
+      description && typeof description !== "string" ? description.content_markdown : "";
+    const descriptionHtml =
+      description && typeof description !== "string" ? description.content_html : "";
+    const truncatedDescription =
+      descriptionText && descriptionText.length > 120
+        ? `${descriptionText.substring(0, 120)}...`
+        : descriptionText;
+
     return (
       <Pressable
+        accessibilityLabel={`Select community ${item.name}@${item.host}`}
+        accessibilityRole="button"
         onPress={() => props.onSelect(item)}
         style={[
           styles.item,
@@ -59,7 +96,7 @@ export default function CommunityFinder(props: CommunityFinderProps) {
             alignItems: "center",
           }}
         >
-          <ActorDisplay
+          <ActorDisplayComponent
             name={item.name}
             host={item.host}
             local={item.local}
@@ -84,11 +121,22 @@ export default function CommunityFinder(props: CommunityFinderProps) {
             )}
           </View>
         </View>
-        {!!item.description && item.description.length > 0 && (
+        {!!descriptionText && (
           <Text style={{ color: theme.secondaryText, marginTop: 10 }}>
-            {item.description?.substring(0, 120)}
-            {(item.description?.length || 0) > 120 && "..."}
+            {truncatedDescription}
           </Text>
+        )}
+        {description && typeof description !== "string" && (
+          <View style={{ marginTop: 10 }}>
+            {!!(descriptionHtml || descriptionMarkdown || description.content_text) && (
+              <ContentDisplay
+                contentHtml={descriptionHtml}
+                contentMarkdown={descriptionMarkdown}
+                contentText={description.content_text}
+                maxChars={120}
+              />
+            )}
+          </View>
         )}
       </Pressable>
     );
@@ -136,3 +184,5 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
   },
 });
+
+/* end of CommunityFinder.tsx */

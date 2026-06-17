@@ -1,8 +1,24 @@
-import { ColorSchemeName, useColorScheme as _useColorScheme } from 'react-native';
+/*
+    Project: Hoot Mobile
+    -------------------
 
-// The useColorScheme value is always either light or dark, but the built-in
-// type suggests that it can be null. This will not happen in practice, so this
-// makes it a bit easier to work with.
-export default function useColorScheme(): NonNullable<ColorSchemeName> {
-  return _useColorScheme() as NonNullable<ColorSchemeName>;
+    File: useColorScheme.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import { useColorScheme as _useColorScheme } from 'react-native';
+
+export type AppColorScheme = "light" | "dark";
+
+export default function useColorScheme(): AppColorScheme {
+  return _useColorScheme() === "dark" ? "dark" : "light";
 }
+
+/* end of useColorScheme.ts */

@@ -1,9 +1,20 @@
-// credit to https://gist.github.com/ianmartorell/32bb7df95e5eff0a5ee2b2f55095e6a6
-// this file was repurosed from there
-// via this issue https://gist.github.com/necolas/1c494e44e23eb7f8c5864a2fac66299a
-// because RNW's pressable doesn't bubble events to parent pressables: https://github.com/necolas/react-native-web/issues/1875
+/*
+    Project: Hoot Mobile
+    -------------------
 
-/* eslint-disable no-inner-declarations */
+    File: Hoverable.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import React, { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Platform } from "react-native";
 import { canUseDOM } from "fbjs/lib/ExecutionEnvironment";
 
 let isEnabled = false;
@@ -43,16 +54,12 @@ function isHoverEnabled(): boolean {
   return isEnabled;
 }
 
-import React, { useCallback, ReactChild, useRef } from "react";
-import { useSharedValue, useAnimatedReaction } from "react-native-reanimated";
-import { Platform } from "react-native";
-
 export interface HoverableProps {
   onHoverIn?: () => void;
   onHoverOut?: () => void;
   onPressIn?: () => void;
   onPressOut?: () => void;
-  children: NonNullable<ReactChild>;
+  children: ReactNode;
 }
 
 export default function Hoverable({
@@ -62,57 +69,50 @@ export default function Hoverable({
   onPressIn,
   onPressOut,
 }: HoverableProps) {
-  const showHover = useSharedValue(true);
-  const isHovered = useSharedValue(false);
+  const [showHover, setShowHover] = useState(true);
+  const [isHovered, setIsHovered] = useState(false);
+  const wasHovered = useRef(false);
+  const pressIn = useRef(onPressIn);
+  const pressOut = useRef(onPressOut);
 
-  const hoverIn = useRef<undefined | (() => void)>(() => onHoverIn?.());
-  const hoverOut = useRef<undefined | (() => void)>(() => onHoverOut?.());
-  const pressIn = useRef<undefined | (() => void)>(() => onPressIn?.());
-  const pressOut = useRef<undefined | (() => void)>(() => onPressOut?.());
+  useEffect(() => {
+    pressIn.current = onPressIn;
+    pressOut.current = onPressOut;
+  }, [onHoverOut, onPressIn, onPressOut]);
 
-  hoverIn.current = onHoverIn;
-  hoverOut.current = onHoverOut;
-  pressIn.current = onPressIn;
-  pressOut.current = onPressOut;
-
-  useAnimatedReaction(
-    () => {
-      return Platform.OS === "web" && showHover.value && isHovered.value;
-    },
-    (hovered, previouslyHovered) => {
-      if (hovered !== previouslyHovered) {
-        if (hovered && hoverIn.current) {
-          // no need for runOnJS, it's always web
-          hoverIn.current();
-        } else if (hoverOut.current) {
-          hoverOut.current();
-        }
+  useEffect(() => {
+    const shouldShowHover = Platform.OS === "web" && showHover && isHovered;
+    if (shouldShowHover !== wasHovered.current) {
+      if (shouldShowHover && onHoverIn) {
+        onHoverIn();
+      } else if (!shouldShowHover && onHoverOut) {
+        onHoverOut();
       }
-    },
-    [],
-  );
+      wasHovered.current = shouldShowHover;
+    }
+  }, [showHover, isHovered, onHoverIn, onHoverOut]);
 
   const handleMouseEnter = useCallback(() => {
-    if (isHoverEnabled() && !isHovered.value) {
-      isHovered.value = true;
+    if (isHoverEnabled() && !isHovered) {
+      setIsHovered(true);
     }
   }, [isHovered]);
 
   const handleMouseLeave = useCallback(() => {
-    if (isHovered.value) {
-      isHovered.value = false;
+    if (isHovered) {
+      setIsHovered(false);
     }
   }, [isHovered]);
 
   const handleGrant = useCallback(() => {
-    showHover.value = false;
+    setShowHover(false);
     pressIn.current?.();
-  }, [showHover]);
+  }, []);
 
   const handleRelease = useCallback(() => {
-    showHover.value = true;
+    setShowHover(true);
     pressOut.current?.();
-  }, [showHover]);
+  }, []);
 
   let webProps = {};
   if (Platform.OS === "web") {
@@ -132,3 +132,5 @@ export default function Hoverable({
     onPressOut: handleRelease,
   });
 }
+
+/* end of Hoverable.tsx */

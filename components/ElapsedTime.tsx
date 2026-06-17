@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: ElapsedTime.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { Ionicons as Icon } from "@expo/vector-icons";
 import React from "react";
 import { Alert, Pressable, StyleSheet } from "react-native";
@@ -25,3 +40,5 @@ export default function ElapsedTime(props: ElapsedTimeProps) {
 const styles = StyleSheet.create({
   root: {},
 });
+
+/* end of ElapsedTime.tsx */

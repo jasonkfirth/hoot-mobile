@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: EditCommunityScreen.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useState } from "react";
 import {
   Alert,
@@ -12,15 +27,18 @@ import { TextInput } from "../components/Themed";
 import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
 import * as LotideService from "../services/LotideService";
-import ActorDisplay from "../components/ActorDisplay";
+import ActorDisplayComponent from "../components/ActorDisplay";
 import { useLotideCtx } from "../hooks/useLotideCtx";
+import { getErrorMessage } from "../utils/error";
 
 export default function EditCommunityScreen({
   navigation,
   route,
 }: RootStackScreenProps<"EditCommunity">) {
   const community = route.params.community;
-  const [description, setDescription] = useState(community.description || "");
+  const [description, setDescription] = useState(
+    getEditableCommunityDescription(community.description),
+  );
   const theme = useTheme();
   const ctx = useLotideCtx();
 
@@ -30,10 +48,10 @@ export default function EditCommunityScreen({
       .then(() => LotideService.getCommunity(ctx, community.id))
       .then(data =>
         navigation.navigate("Community", {
-          community: { ...data, description },
+          community: data,
         }),
       )
-      .catch(e => Alert.alert("Failed to edit community", e));
+      .catch(e => Alert.alert("Failed to edit community", getErrorMessage(e)));
   }
 
   return (
@@ -44,7 +62,7 @@ export default function EditCommunityScreen({
         style={styles.root}
         onPress={() => Platform.OS !== "web" && Keyboard.dismiss()}
       >
-        <ActorDisplay
+        <ActorDisplayComponent
           name={community.name}
           host={community.host}
           local={community.local}
@@ -65,6 +83,23 @@ export default function EditCommunityScreen({
   );
 }
 
+function getEditableCommunityDescription(description: Community["description"]) {
+  if (typeof description === "string") {
+    return description;
+  }
+
+  if (!description) {
+    return "";
+  }
+
+  return (
+    description.content_markdown ||
+    description.content_text ||
+    description.content_html ||
+    ""
+  );
+}
+
 const styles = StyleSheet.create({
   root: { padding: 20, paddingBottom: 100 },
   title: {
@@ -76,3 +111,5 @@ const styles = StyleSheet.create({
     minHeight: 100,
   },
 });
+
+/* end of EditCommunityScreen.tsx */

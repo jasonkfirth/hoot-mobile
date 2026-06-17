@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: StorageService.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export const lotideContext = {
@@ -20,7 +35,7 @@ export const lotideContext = {
 
 export const lotideContextKV = {
   async store(ctx: LotideContext) {
-    if (!ctx.login) return;
+    if (!ctx.login?.user) return;
     const name = `${ctx.login.user.username}@${ctx.apiUrl}`;
     serviceKV.store("@lotide_ctx_arr", name, ctx);
   },
@@ -34,7 +49,7 @@ export const lotideContextKV = {
     return serviceKV.remove("@lotide_ctx_arr", k);
   },
   async logout(ctx: LotideContext) {
-    if (!ctx.login) return;
+    if (!ctx.login?.user) return;
     const name = `${ctx.login.user.username}@${ctx.apiUrl}`;
     serviceKV.store("@lotide_ctx_arr", name, { apiUrl: ctx.apiUrl });
   },
@@ -72,3 +87,5 @@ const serviceKV = {
     return v;
   },
 };
+
+/* end of StorageService.ts */

@@ -1,11 +1,38 @@
-import { lotideRequest } from "./util";
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: Post.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import { lotideRequest, readJson } from "./util";
+import {
+  normalizePaged,
+  normalizePost,
+  normalizeSubmittedId,
+} from "./validation";
 
 export async function getPost(
   ctx: LotideContext,
   postId: PostId,
 ): Promise<Post> {
-  return lotideRequest(ctx, "GET", `posts/${postId}`, undefined, true)
-    .then(data => data.json())
+  return lotideRequest(
+    ctx,
+    "GET",
+    `posts/${postId}${ctx.login ? "?include_your=true" : ""}`,
+    undefined,
+    true,
+  )
+    .then(readJson)
+    .then(normalizePost)
     .then(transformVote);
 }
 
@@ -16,24 +43,35 @@ export async function getPosts(
   inYourFollows?: boolean,
   communityId?: CommunityId,
 ): Promise<Paged<Post>> {
-  const url = [
-    page === null ? `posts?sort=${sort}` : `posts?page=${page}&sort=${sort}`,
-    `include_your=true`,
+  const query = [
+    `sort=${encodeURIComponent(sort)}`,
+    page !== null && `page=${encodeURIComponent(page)}`,
+    ctx.login && `include_your=true`,
     inYourFollows !== undefined && `in_your_follows=${inYourFollows}`,
-    communityId && `community=${communityId}`,
+    inYourFollows === undefined &&
+      communityId === undefined &&
+      `use_aggregate_filters=true`,
+    communityId !== undefined && `community=${communityId}`,
+    communityId !== undefined && sort === "hot" && `sort_sticky=true`,
   ]
     .filter(x => x)
     .join("&");
-  return lotideRequest(ctx, "GET", url)
-    .then(data => data.json())
-    .then(data => ({ ...data, items: data.items.map(transformVote) }));
+  return lotideRequest(ctx, "GET", `posts?${query}`, undefined, true)
+    .then(readJson)
+    .then(data => normalizePaged(data, normalizePost, "posts"))
+    .then(data => ({
+      ...data,
+      items: data.items.map(transformVote),
+    }));
 }
 
 export async function submitPost(
   ctx: LotideContext,
   post: NewPost,
 ): Promise<{ id: PostId }> {
-  return lotideRequest(ctx, "POST", "posts", post).then(data => data.json());
+  return lotideRequest(ctx, "POST", "posts", post)
+    .then(readJson)
+    .then(data => normalizeSubmittedId(data, "new post"));
 }
 
 export async function applyVote(ctx: LotideContext, postId: PostId) {
@@ -45,6 +83,10 @@ export async function removeVote(ctx: LotideContext, postId: PostId) {
 }
 
 export function transformVote(post: Readonly<Post>): Post {
+  if (typeof post.your_vote === "boolean") {
+    return post as Post;
+  }
+
   if (post.your_vote !== undefined) {
     return {
       ...post,
@@ -54,3 +96,5 @@ export function transformVote(post: Readonly<Post>): Post {
     return post;
   }
 }
+
+/* end of Post.ts */

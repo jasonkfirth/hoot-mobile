@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: CommentsDisplay.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React from "react";
 import { ColorValue, Pressable, StyleSheet, View } from "react-native";
 import Icon from "@expo/vector-icons/Ionicons";
@@ -7,11 +22,12 @@ import * as Haptics from "../services/HapticService";
 import ElapsedTime from "./ElapsedTime";
 import ContentDisplay from "./ContentDisplay";
 import VoteCounter from "./VoteCounter";
-import ActorDisplay from "./ActorDisplay";
+import ActorDisplayComponent from "./ActorDisplay";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import useComments from "../hooks/useComments";
 import useComment from "../hooks/useComment";
 import useSelectedComment from "../hooks/useSelectedComment";
+import RetryState from "./RetryState";
 
 export interface CommentsDisplayProps {
   parentType: ContentType;
@@ -30,7 +46,10 @@ export default function CommentsDisplay({
   postId,
   highlightedComments = [],
 }: CommentsDisplayProps) {
-  const { comments, loadNextPage } = useComments(parentType, parentId);
+  const { comments, isLoading, loadError, loadNextPage } = useComments(
+    parentType,
+    parentId,
+  );
   const theme = useTheme();
   const ctx = useLotideCtx();
   if (!ctx) return null;
@@ -46,7 +65,27 @@ export default function CommentsDisplay({
     theme.purple,
   ];
 
-  if (!comments) return <Text>Can't find comments</Text>;
+  if (!comments) {
+    if (loadError) {
+      return (
+        <RetryState
+          compact
+          message={loadError}
+          onRetry={loadNextPage}
+          style={styles.retry}
+        />
+      );
+    }
+
+    return (
+      <Text
+        accessibilityState={{ busy: isLoading }}
+        style={{ margin: 17, color: theme.secondaryText }}
+      >
+        Loading comments
+      </Text>
+    );
+  }
 
   return (
     <View>
@@ -61,13 +100,20 @@ export default function CommentsDisplay({
           highlightedComments={highlightedComments}
         />
       ))}
-      {comments.next_page !== null && (
+      {loadError ? (
+        <RetryState
+          compact
+          message={loadError}
+          onRetry={loadNextPage}
+          style={styles.retry}
+        />
+      ) : comments.next_page !== null ? (
         <Pressable hitSlop={5} onPress={loadNextPage}>
           <Text style={{ color: theme.tint, paddingTop: 5, paddingBottom: 10 }}>
             More comments <Icon name="chevron-down-outline" />
           </Text>
         </Pressable>
-      )}
+      ) : null}
       {comments.next_page === null && layer === 0 && (
         <Text style={{ margin: 17, color: theme.secondaryText }}>
           {comments.items.length > 0 ? "No more comments" : "No comments yet"}
@@ -92,8 +138,13 @@ function CommentDisplay({
   postId?: PostId;
   highlightedComments?: CommentId[];
 }) {
-  const comment = useComment(commentId);
-  const { comments, loadNextPage } = useComments("comment", commentId);
+  const [commentReloadId, setCommentReloadId] = React.useState(0);
+  const comment = useComment(commentId, commentReloadId);
+  const {
+    comments,
+    loadError: childLoadError,
+    loadNextPage,
+  } = useComments("comment", commentId);
   const [showChildren, setShowChildren] = React.useState(true);
   const theme = useTheme();
   const ctx = useLotideCtx();
@@ -101,7 +152,16 @@ function CommentDisplay({
 
   if (!ctx) return null;
 
-  if (!comment) return <Text>Failed to load comment</Text>;
+  if (!comment) {
+    return (
+      <RetryState
+        compact
+        message="Cannot load comment"
+        onRetry={() => setCommentReloadId(x => x + 1)}
+        style={styles.retry}
+      />
+    );
+  }
 
   return (
     <View style={{ paddingLeft: 0 }}>
@@ -115,7 +175,7 @@ function CommentDisplay({
         <Pressable
           onPress={() =>
             setSelectedComment(
-              selectedComment != comment.id ? comment.id : undefined,
+              selectedComment !== comment.id ? comment.id : undefined,
             )
           }
         >
@@ -139,15 +199,21 @@ function CommentDisplay({
                 marginBottom: 5,
               }}
             >
-              <ActorDisplay
-                name={comment.author.username}
-                host={comment.author.host}
-                local={comment.author.local}
-                showHost="only_foreign"
-                colorize="only_foreign"
-                style={{ fontSize: 16, fontWeight: "500" }}
-                userId={comment.author.id}
-              />
+              {comment.author ? (
+                <ActorDisplayComponent
+                  name={comment.author.username}
+                  host={comment.author.host}
+                  local={comment.author.local ?? false}
+                  showHost="only_foreign"
+                  colorize="only_foreign"
+                  style={{ fontSize: 16, fontWeight: "500" }}
+                  userId={comment.author.id}
+                />
+              ) : (
+                <Text style={{ color: theme.secondaryText }}>
+                  Unknown author
+                </Text>
+              )}
               <View
                 style={{
                   marginRight: 15,
@@ -174,7 +240,7 @@ function CommentDisplay({
               />
             )}
           </View>
-          {selectedComment == comment.id && (
+          {selectedComment === comment.id && (
             <View style={styles.buttons}>
               <VoteCounter
                 type="comment"
@@ -191,8 +257,8 @@ function CommentDisplay({
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   navigation.navigate("Comment", {
                     id: comment.id,
-                    title: comment.author.username,
-                    html: comment.content_html,
+                    title: comment.author?.username || "Comment",
+                    html: comment.content_html || comment.content_text || "",
                     type: "comment",
                   });
                 }}
@@ -244,7 +310,14 @@ function CommentDisplay({
         ) : (
           <Text>...</Text>
         ))}
-      {comments == undefined && (
+      {childLoadError ? (
+        <RetryState
+          compact
+          message={childLoadError}
+          onRetry={loadNextPage}
+          style={styles.nestedRetry}
+        />
+      ) : comments === undefined ? (
         <Pressable hitSlop={5} onPress={loadNextPage}>
           <View style={{ paddingHorizontal: 15, paddingBottom: 10 }}>
             <Text style={{ color: theme.tint }}>
@@ -252,7 +325,7 @@ function CommentDisplay({
             </Text>
           </View>
         </Pressable>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -269,4 +342,13 @@ const styles = StyleSheet.create({
     padding: 10,
     paddingHorizontal: 15,
   },
+  retry: {
+    padding: 17,
+  },
+  nestedRetry: {
+    paddingHorizontal: 15,
+    paddingBottom: 10,
+  },
 });
+
+/* end of CommentsDisplay.tsx */

@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: ModalScreen.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import Icon from "@expo/vector-icons/Ionicons";
 import React, { useState } from "react";
 import {
@@ -14,19 +29,30 @@ import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
 import CommentsDisplay from "../components/CommentsDisplay";
 import usePost from "../hooks/usePost";
+import RetryState from "../components/RetryState";
 
 export default function ModalScreen({
   navigation,
   route,
-}: RootStackScreenProps<"Post">) {
+}: RootStackScreenProps<"Post" | "Modal">) {
   const postId = route.params.postId;
-  const post = usePost(postId);
+  const [postReloadId, setPostReloadId] = useState(0);
+  const post = usePost(postId, postReloadId);
   const [highlightedComments, setHighlightedComments] = useState(
     route.params.highlightedComments,
   );
   const theme = useTheme();
 
-  if (!post) return <Text>No post</Text>;
+  if (!post) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <RetryState
+          message="Cannot load post"
+          onRetry={() => setPostReloadId(x => x + 1)}
+        />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={{ backgroundColor: theme.background }}>
@@ -46,7 +72,7 @@ export default function ModalScreen({
               navigation.navigate("Comment", {
                 id: post.id,
                 title: post.title,
-                html: post.content_html,
+                html: post.content_html ?? "",
                 type: "post",
               });
             }}
@@ -106,7 +132,7 @@ const styles = StyleSheet.create({
   link: {
     paddingVertical: 10,
     paddingHorizontal: 15,
-    backgroundColor: "#8884",
+    backgroundColor: "#88888844",
     borderRadius: 5,
     marginHorizontal: 15,
   },
@@ -122,7 +148,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     width: "100%",
     padding: 15,
-    borderBottomColor: "#8884",
+    borderBottomColor: "#88888844",
     borderBottomWidth: 2,
   },
   by: {
@@ -136,3 +162,5 @@ const styles = StyleSheet.create({
     padding: 10,
   },
 });
+
+/* end of ModalScreen.tsx */

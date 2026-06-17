@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hoot",
     "slug": "hoot-mobile",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
@@ -33,12 +33,24 @@
       "package": "org.brokenlamp.hoot"
     },
     "web": {
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "bundler": "metro"
     },
     "extra": {
       "eas": {
         "projectId": "095b592d-5c41-4395-a910-06e9c77b493b"
       }
-    }
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      "expo-background-task",
+      "expo-task-manager",
+      "expo-notifications",
+      "expo-system-ui",
+      "expo-splash-screen",
+      "expo-status-bar",
+      "expo-web-browser"
+    ]
   }
 }

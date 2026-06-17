@@ -1,11 +1,40 @@
-import { lotideRequest } from "./util";
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: Comment.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import { lotideRequest, readJson } from "./util";
+import {
+  normalizeComment,
+  normalizePaged,
+  normalizeSubmittedId,
+  normalizeVote,
+  RawComment,
+} from "./validation";
 
 export async function getComment(
   ctx: LotideContext,
   commentId: CommentId,
 ): Promise<Comment[]> {
-  return lotideRequest(ctx, "GET", `comments/${commentId}`, undefined, true)
-    .then(data => data.json())
+  return lotideRequest(
+    ctx,
+    "GET",
+    `comments/${commentId}${ctx.login ? "?include_your=true" : ""}`,
+    undefined,
+    true,
+  )
+    .then(readJson)
+    .then(normalizeComment)
     .then(transformComment);
 }
 
@@ -16,10 +45,12 @@ export async function getRawComment(
   return lotideRequest(
     ctx,
     "GET",
-    `comments/${commentId}`,
+    `comments/${commentId}${ctx.login ? "?include_your=true" : ""}`,
     undefined,
     true,
-  ).then(data => data.json());
+  )
+    .then(readJson)
+    .then(normalizeComment);
 }
 
 export async function getPostComments(
@@ -30,10 +61,16 @@ export async function getPostComments(
   return lotideRequest(
     ctx,
     "GET",
-    `posts/${postId}/replies?limit=10&include_your=true` +
-      (page ? `&page=${page}` : ""),
+    [
+      `posts/${postId}/replies?limit=10&sort=hot`,
+      ctx.login && "include_your=true",
+      page && `page=${encodeURIComponent(page)}`,
+    ].filter(Boolean).join("&"),
+    undefined,
+    true,
   )
-    .then(data => data.json())
+    .then(readJson)
+    .then(data => normalizePaged(data, normalizeComment, "post replies"))
     .then(transformCommentMulti);
 }
 
@@ -45,10 +82,16 @@ export async function getCommentComments(
   return lotideRequest(
     ctx,
     "GET",
-    `comments/${commentId}/replies?limit=10&include_your=true&sort=hot` +
-      (page ? `&page=${page}` : ""),
+    [
+      `comments/${commentId}/replies?limit=10&sort=hot`,
+      ctx.login && "include_your=true",
+      page && `page=${encodeURIComponent(page)}`,
+    ].filter(Boolean).join("&"),
+    undefined,
+    true,
   )
-    .then(data => data.json())
+    .then(readJson)
+    .then(data => normalizePaged(data, normalizeComment, "comment replies"))
     .then(transformCommentMulti);
 }
 
@@ -59,7 +102,9 @@ export async function commentOnPost(
 ): Promise<{ id: CommentId }> {
   return lotideRequest(ctx, "POST", `posts/${postId}/replies`, {
     content_markdown: content,
-  }).then(data => data.json());
+  })
+    .then(readJson)
+    .then(data => normalizeSubmittedId(data, "post reply"));
 }
 
 export async function commentOnComment(
@@ -70,7 +115,8 @@ export async function commentOnComment(
   return lotideRequest(ctx, "POST", `comments/${commentId}/replies`, {
     content_markdown: content,
   })
-    .then(data => data.json())
+    .then(readJson)
+    .then(data => normalizeSubmittedId(data, "comment reply"))
     .then(data => data.id);
 }
 
@@ -88,21 +134,16 @@ export async function removeCommentVote(
   return lotideRequest(ctx, "DELETE", `comments/${commentId}/your_vote`);
 }
 
-type RawComment = Omit<Omit<Comment, "replies">, "your_vote"> & {
-  replies: Paged<RawComment> | null;
-  your_vote?: {} | null;
-};
-
 export function transformComment(comment: Readonly<RawComment>): Comment[] {
   const comments = comment.replies;
 
   const [childIds, childData] = transformCommentMulti(comments || undefined);
 
-  const newComment: Comment = {
+  const newComment = {
     ...comment,
     replies: childIds,
-    your_vote: comment.your_vote !== null && comment.your_vote !== undefined,
-  };
+    your_vote: normalizeVote(comment.your_vote),
+  } as Comment;
 
   return [newComment, ...childData];
 }
@@ -113,9 +154,11 @@ export function transformCommentMulti(
   if (!comments) return [undefined, []];
   return [
     {
-      items: comments.items.map(reply => reply.id),
+      items: comments.items.map(reply => reply.id as CommentId),
       next_page: comments.next_page,
     },
     comments.items.flatMap(transformComment),
   ];
 }
+
+/* end of Comment.ts */

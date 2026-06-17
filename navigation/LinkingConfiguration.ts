@@ -1,36 +1,74 @@
 /**
- * Learn more about deep linking with React Navigation
- * https://reactnavigation.org/docs/deep-linking
- * https://reactnavigation.org/docs/configuring-links
- */
+    Project: Hoot Mobile
+    -------------------
+
+    File: LinkingConfiguration.ts
+
+    Purpose:
+
+        Configures deep linking for the application, mapping URL paths
+        to specific screens and their parameters.
+
+    Responsibilities:
+
+        • Define URL prefixes for the application
+        • Map URL paths to navigation stack/tab routes
+        • Configure parameter parsing for deep linked routes
+
+    This file intentionally does NOT contain:
+
+        • Navigation structure definitions (see navigation/index.tsx)
+        • Screen implementations
+*/
 
 import { LinkingOptions } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 
 import { RootStackParamList } from '../types';
 
+/* ------------------------------------------------------------------------- */
+/* Deep Linking Configuration                                                */
+/* ------------------------------------------------------------------------- */
+
 const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: [Linking.makeUrl('/')],
+  prefixes: [Linking.createURL('/')],
   config: {
     screens: {
       Root: {
         screens: {
-          TabOne: {
-            screens: {
-              TabOneScreen: 'one',
+          FeedScreen: {
+            path: 'feed/:sort',
+            parse: {
+              sort: (sort: string) => sort as any,
             },
           },
-          TabTwo: {
-            screens: {
-              TabTwoScreen: 'two',
-            },
-          },
+          SearchScreen: 'search',
+          NewPostScreen: 'new-post',
+          NotificationScreen: 'notifications',
+          ProfileScreen: 'profile',
         },
       },
-      Modal: 'modal',
+      Post: 'post/:postId',
+      Comment: 'comment/:id',
+      Community: {
+        path: 'community/:id',
+        parse: {
+          id: (id: string) => Number(id),
+        },
+      },
+      ProfileActivity: {
+        path: 'users/:userId/activity',
+        parse: {
+          userId: (userId: string) => Number(userId),
+        },
+      },
+      Moderation: 'moderation',
+      Settings: 'settings',
       NotFound: '*',
     },
   },
 };
 
 export default linking;
+
+/* end of LinkingConfiguration.ts */

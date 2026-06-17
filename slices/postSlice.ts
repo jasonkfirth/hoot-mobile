@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: postSlice.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 export interface PostState {
@@ -59,3 +74,5 @@ export const { setPost, setPostMulti, editPost, clearPosts, setPostVote } =
   postSlice.actions;
 
 export default postSlice.reducer;
+
+/* end of postSlice.ts */

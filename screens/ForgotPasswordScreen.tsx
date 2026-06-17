@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: ForgotPasswordScreen.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useState } from "react";
 import { RootStackScreenProps } from "../types";
 import { Text, TextInput, View } from "../components/Themed";
@@ -12,6 +27,7 @@ import {
 } from "react-native";
 import useTheme from "../hooks/useTheme";
 import * as LotideService from "../services/LotideService";
+import { getErrorMessage } from "../utils/error";
 
 export default function ForgotPasswordScreen({
   navigation,
@@ -36,7 +52,7 @@ export default function ForgotPasswordScreen({
       .then(() => {
         setIsAwaitingKey(true);
       })
-      .catch(e => Alert.alert("Failed to send reset key", e));
+      .catch(e => Alert.alert("Failed to send reset key", getErrorMessage(e)));
   }
 
   function submitPassword() {
@@ -75,7 +91,7 @@ export default function ForgotPasswordScreen({
               onChangeText={setEmail}
               keyboardType="email-address"
               textContentType="emailAddress"
-              autoCompleteType="email"
+              autoComplete="email"
               returnKeyType="go"
               autoCapitalize="none"
             />
@@ -93,7 +109,7 @@ export default function ForgotPasswordScreen({
                   autoCapitalize="none"
                   secureTextEntry={true}
                   textContentType="password"
-                  autoCompleteType="password"
+                  autoComplete="password"
                 />
                 <View style={styles.actionButtons}>
                   <Button
@@ -143,3 +159,5 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
   },
 });
+
+/* end of ForgotPasswordScreen.tsx */

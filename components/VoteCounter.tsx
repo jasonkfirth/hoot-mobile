@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: VoteCounter.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { Ionicons as Icon } from "@expo/vector-icons";
 import React from "react";
 import {
@@ -73,10 +88,12 @@ const styles = StyleSheet.create({
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
-    ...(Platform.OS == "web" ? { cursor: "pointer" } : {}),
+    ...(Platform.OS === "web" ? { cursor: "pointer" } : {}),
   },
   score: {
     fontSize: 18,
     minWidth: 28,
   },
 });
+
+/* end of VoteCounter.tsx */

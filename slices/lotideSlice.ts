@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: lotideSlice.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 type LotideState = {
@@ -22,3 +37,5 @@ export const voteSlice = createSlice({
 export const { setCtx } = voteSlice.actions;
 
 export default voteSlice.reducer;
+
+/* end of lotideSlice.ts */

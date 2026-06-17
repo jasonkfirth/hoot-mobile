@@ -1,4 +1,19 @@
-import React from "react";
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: PostDisplay.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import React, { useState } from "react";
 import Icon from "@expo/vector-icons/Ionicons";
 import { StyleSheet, Pressable, Platform, ViewStyle } from "react-native";
 import ElapsedTime from "./ElapsedTime";
@@ -6,9 +21,10 @@ import VoteCounter from "./VoteCounter";
 import { Text, View } from "../components/Themed";
 import useTheme from "../hooks/useTheme";
 import ContentDisplay from "./ContentDisplay";
-import ActorDisplay from "./ActorDisplay";
+import ActorDisplayComponent from "./ActorDisplay";
 import usePost from "../hooks/usePost";
 import HrefDisplay from "./HrefDisplay";
+import RetryState from "./RetryState";
 
 export interface PostDisplayProps {
   postId: PostId;
@@ -18,10 +34,24 @@ export interface PostDisplayProps {
 }
 
 export default function PostDisplay(props: PostDisplayProps) {
-  const post = usePost(props.postId);
+  const [reloadId, setReloadId] = useState(0);
+  const post = usePost(props.postId, reloadId);
   const theme = useTheme();
 
-  if (!post) return <Text>Failed to load post</Text>;
+  if (!post) {
+    return (
+      <RetryState
+        compact
+        message="Cannot load post"
+        onRetry={() => setReloadId(x => x + 1)}
+        style={styles.retry}
+      />
+    );
+  }
+
+  const author = post.author;
+  const community = post.community;
+  const canOpenCommunity = !!community?.id && !!community.name && !!community.host;
 
   return (
     <View>
@@ -33,16 +63,20 @@ export default function PostDisplay(props: PostDisplayProps) {
         )}
         {post.title.trim()}
       </Text>
-      <ActorDisplay
-        name={post.author.username}
-        host={post.author.host}
-        local={post.author.local}
-        showHost={"only_foreign"}
-        colorize={"never"}
-        newLine={true}
-        userId={post.author.id}
-        style={styles.username}
-      />
+      {author ? (
+        <ActorDisplayComponent
+          name={author.username}
+          host={author.host}
+          local={author.local ?? false}
+          showHost={"only_foreign"}
+          colorize={"never"}
+          newLine={true}
+          userId={author.id}
+          style={styles.username}
+        />
+      ) : (
+        <Text style={styles.username}>Unknown author</Text>
+      )}
       {!!post.href && <HrefDisplay href={post.href} />}
       {!!post.href && !!post.content_html && <View style={{ marginTop: 15 }} />}
       {!!post.content_html && (
@@ -57,22 +91,38 @@ export default function PostDisplay(props: PostDisplayProps) {
       )}
       <View style={styles.foot}>
         <Pressable
+          accessibilityLabel={
+            canOpenCommunity
+              ? `Open community ${community.name}@${community.host}`
+              : "Unknown community"
+          }
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canOpenCommunity }}
           hitSlop={8}
           onPress={() =>
+            canOpenCommunity &&
             props.navigation.navigate("Community", {
-              community: post.community,
+              community,
             })
           }
-          style={[styles.footItem, styles.pointer]}
+          disabled={!canOpenCommunity}
+          style={[
+            styles.footItem,
+            canOpenCommunity ? styles.pointer : styles.disabled,
+          ]}
         >
-          <ActorDisplay
-            name={post.community.name}
-            host={post.community.host}
-            local={post.community.local}
-            showHost={"only_foreign"}
-            colorize={props.showAuthor ? "always" : "never"}
-            newLine={true}
-          />
+          {canOpenCommunity ? (
+            <ActorDisplayComponent
+              name={community.name}
+              host={community.host}
+              local={community.local}
+              showHost={"only_foreign"}
+              colorize={props.showAuthor ? "always" : "never"}
+              newLine={true}
+            />
+          ) : (
+            <Text>Unknown community</Text>
+          )}
         </Pressable>
         <View style={{ flex: 1 }} />
         <View style={styles.footItem}>
@@ -98,7 +148,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
   },
   pointer: {
-    ...(Platform.OS == "web" ? { cursor: "pointer" } : {}),
+    ...(Platform.OS === "web" ? { cursor: "pointer" } : {}),
   } as ViewStyle,
   title: {
     fontSize: 20,
@@ -116,7 +166,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     borderRadius: 5,
     marginHorizontal: 15,
-    ...(Platform.OS == "web" ? { cursor: "pointer" } : {}),
+    ...(Platform.OS === "web" ? { cursor: "pointer" } : {}),
   },
   image: {
     width: "100%",
@@ -134,6 +184,9 @@ const styles = StyleSheet.create({
   footItem: {
     padding: 15,
   },
+  disabled: {
+    opacity: 0.65,
+  },
   by: {
     fontSize: 11,
   },
@@ -147,4 +200,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 10,
   },
+  retry: {
+    padding: 15,
+  },
 });
+
+/* end of PostDisplay.tsx */

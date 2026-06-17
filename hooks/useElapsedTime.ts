@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: useElapsedTime.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { useMemo } from "react";
 
 export default function useElapsedTime(time: string): string {
@@ -21,3 +36,5 @@ export function calculateElapsedTime(time: string): string {
     `${years}y`;
   return displayTime;
 }
+
+/* end of useElapsedTime.ts */

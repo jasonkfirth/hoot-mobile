@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: NewPostScreen.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -16,10 +31,11 @@ import * as LotideService from "../services/LotideService";
 import useTheme from "../hooks/useTheme";
 import SuggestLogin from "../components/SuggestLogin";
 import CommunityFinder from "../components/CommunityFinder";
-import ActorDisplay from "../components/ActorDisplay";
+import ActorDisplayComponent from "../components/ActorDisplay";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import { useDispatch } from "react-redux";
 import { setPost } from "../slices/postSlice";
+import { getErrorMessage } from "../utils/error";
 
 export default function NewPostScreen({
   navigation,
@@ -40,18 +56,18 @@ export default function NewPostScreen({
       if (route.params.community) {
         return setCommunity(route.params.community);
       }
-      if (community === null) {
-        return setCommunity(undefined);
-      }
+      setCommunity(existingCommunity =>
+        existingCommunity === null ? undefined : existingCommunity,
+      );
     });
-  }, [community, community?.id, route.params.community?.id]);
+  }, [navigation, route.params.community, route.params.community?.id]);
 
   if (!ctx?.login) {
     return <SuggestLogin />;
   }
 
   if (community === null)
-    return <CommunityFinder onSelect={setCommunity} onlyWhenTyping />;
+    return <CommunityFinder onSelect={setCommunity} />;
 
   function submit() {
     if (!ctx || !community) return;
@@ -68,7 +84,7 @@ export default function NewPostScreen({
           navigation.navigate("Post", { postId: post.id });
         });
       })
-      .catch(e => Alert.alert("Could not submit post", e));
+      .catch(e => Alert.alert("Could not submit post", getErrorMessage(e)));
   }
 
   function reset() {
@@ -84,9 +100,13 @@ export default function NewPostScreen({
         onPress={() => Platform.OS !== "web" && Keyboard.dismiss()}
       >
         <View style={styles.container}>
-          <Pressable onPress={() => setCommunity(null)}>
+          <Pressable
+            accessibilityLabel="Select community"
+            accessibilityRole="button"
+            onPress={() => setCommunity(null)}
+          >
             {community ? (
-              <ActorDisplay
+              <ActorDisplayComponent
                 name={community.name}
                 host={community.host}
                 local={community.local}
@@ -179,3 +199,5 @@ const styles = StyleSheet.create({
     marginBottom: 1,
   },
 });
+
+/* end of NewPostScreen.tsx */

@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: CommentScreen.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useRef, useState } from "react";
 import {
   Button,
@@ -84,3 +99,5 @@ const styles = StyleSheet.create({
     minHeight: 100,
   },
 });
+
+/* end of CommentScreen.tsx */

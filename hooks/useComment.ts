@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: useComment.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store/reduxStore";
@@ -10,7 +25,10 @@ import { setCommentMulti } from "../slices/commentSlice";
  *
  * For child comments, see useComments
  */
-export default function useComment(commentId?: CommentId): Comment | undefined {
+export default function useComment(
+  commentId?: CommentId,
+  reloadId = 0,
+): Comment | undefined {
   const dispatch = useDispatch();
   const comment: Comment | undefined = useSelector((state: RootState) =>
     commentId ? state.comments.comments[commentId] : undefined,
@@ -27,7 +45,7 @@ export default function useComment(commentId?: CommentId): Comment | undefined {
         })
         .catch(() => console.log(`Comment ${commentId} could not be loaded`));
     }
-  }, [comment?.id]);
+  }, [comment, commentId, ctx, dispatch, reloadId]);
 
   return (
     comment && {
@@ -36,3 +54,5 @@ export default function useComment(commentId?: CommentId): Comment | undefined {
     }
   );
 }
+
+/* end of useComment.ts */

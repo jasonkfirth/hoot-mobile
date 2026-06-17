@@ -1,12 +1,27 @@
-import React, { useState } from "react";
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: HoverHighlight.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import React, { PropsWithChildren, useState } from "react";
 import { View, ViewStyle } from "react-native";
 import useTheme from "../hooks/useTheme";
 import Hoverable from "./Hoverable";
 
-export type HoverHighlightProps = {
+export type HoverHighlightProps = PropsWithChildren<{
   style?: ViewStyle;
   hoverStyle?: ViewStyle;
-};
+}>;
 
 export const HoverHighlight: React.FC<HoverHighlightProps> = props => {
   const [isHovered, setIsHovered] = useState(false);
@@ -29,3 +44,5 @@ export const HoverHighlight: React.FC<HoverHighlightProps> = props => {
 };
 
 export default HoverHighlight;
+
+/* end of HoverHighlight.tsx */

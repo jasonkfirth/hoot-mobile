@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: NewCommunity.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import React, { useState } from "react";
 import { Alert, Button, StyleSheet, TextInput } from "react-native";
 import { Text, View } from "../components/Themed";
@@ -5,6 +20,7 @@ import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
 import * as LotideService from "../services/LotideService";
 import { useLotideCtx } from "../hooks/useLotideCtx";
+import { getErrorMessage } from "../utils/error";
 
 export default function NewCommunityScreen({
   navigation,
@@ -28,7 +44,7 @@ export default function NewCommunityScreen({
         const community = await LotideService.getCommunity(ctx, id);
         navigation.replace("Community", { community });
       })
-      .catch(e => Alert.alert("Failed to create community", e));
+      .catch(e => Alert.alert("Failed to create community", getErrorMessage(e)));
   }
 
   return (
@@ -95,3 +111,5 @@ const styles = StyleSheet.create({
     marginBottom: 1,
   },
 });
+
+/* end of NewCommunity.tsx */

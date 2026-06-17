@@ -1,3 +1,18 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: useHrefData.ts
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
 import { useMemo } from "react";
 
 /**
@@ -44,3 +59,5 @@ function ext(url: string): string {
     .split("#")[0]
     .substr(url.lastIndexOf("."));
 }
+
+/* end of useHrefData.ts */

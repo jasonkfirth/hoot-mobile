@@ -1,4 +1,24 @@
-import React, { ReactNode, useEffect, useRef, useState } from "react";
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: SwipeAction.tsx
+
+    Purpose:
+
+        System file for Hoot Mobile.
+
+    Responsibilities:
+
+        • Part of the Hoot Mobile ecosystem
+*/
+
+import React, {
+  ReactNode,
+  useCallback,
+  useRef,
+  useState,
+} from "react";
 import Icon from "@expo/vector-icons/Ionicons";
 import {
   ColorValue,
@@ -29,11 +49,24 @@ export type SwipeActionProps = {
 };
 
 export default function SwipeAction(props: SwipeActionProps) {
-  if (Platform.OS !== "ios")
-    return <View style={props.style}>{props.children}</View>;
-  const distanceToActivate = props.distanceToActivate || 60;
+  const {
+    iconLeftSide,
+    iconRightSide,
+    colorLeftSide,
+    colorRightSide,
+    backgroundColor,
+    onLeftSide,
+    onRightSide,
+    onReturnToCenter,
+    children,
+    distanceToActivate: distanceToActivateProp,
+    style,
+  } = props;
+
+  const distanceToActivate = distanceToActivateProp || 60;
+  const rightActivationPoint = distanceToActivate * 2;
+
   const [isScrolling, setIsScrolling] = useState(false);
-  const [scroll, setScroll] = useState(0);
   const [isLeft, setIsLeft] = useState(false);
   const [isRight, setIsRight] = useState(false);
   const [isCommitted, setIsCommitted] = useState(false);
@@ -41,38 +74,57 @@ export default function SwipeAction(props: SwipeActionProps) {
   const [width, setWidth] = useState<number>(dimensions.width);
   const scrollRef = useRef<ScrollView>(null);
 
-  useEffect(() => {
-    if (scroll < 0 && !isLeft) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setIsLeft(true);
-    } else if (scroll >= 0 && isLeft) {
-      setIsLeft(false);
-      if (!isScrolling) {
-        setIsCommitted(true);
-        props.onLeftSide();
+  const evaluateSwipe = useCallback(
+    (nextScroll: number) => {
+      if (nextScroll < 0 && !isLeft) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setIsLeft(true);
+      } else if (nextScroll >= 0 && isLeft) {
+        setIsLeft(false);
+        if (!isScrolling) {
+          setIsCommitted(true);
+          onLeftSide();
+        }
       }
-    }
-    if (scroll >= distanceToActivate * 2 && !isRight) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setIsRight(true);
-    } else if (scroll < distanceToActivate * 2 && isRight) {
-      setIsRight(false);
-      if (!isScrolling) {
-        setIsCommitted(true);
-        props.onRightSide();
-      }
-    }
-    if (scroll == distanceToActivate) {
-      props.onReturnToCenter?.();
-      setIsRight(false);
-      setIsLeft(false);
-      setIsCommitted(false);
-    }
-  }, [scroll]);
 
-  function onScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
-    const scroll = event?.nativeEvent?.contentOffset?.x;
-    setScroll(scroll);
+      if (nextScroll >= rightActivationPoint && !isRight) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setIsRight(true);
+      } else if (nextScroll < rightActivationPoint && isRight) {
+        setIsRight(false);
+        if (!isScrolling) {
+          setIsCommitted(true);
+          onRightSide();
+        }
+      }
+
+      if (nextScroll === distanceToActivate) {
+        onReturnToCenter?.();
+        setIsRight(false);
+        setIsLeft(false);
+        setIsCommitted(false);
+      }
+    },
+    [distanceToActivate, isLeft, isRight, isScrolling, onLeftSide, onRightSide, onReturnToCenter, rightActivationPoint],
+  );
+
+  const onScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const nextScroll = event?.nativeEvent?.contentOffset?.x;
+      if (nextScroll === undefined) return;
+      evaluateSwipe(nextScroll);
+    },
+    [evaluateSwipe],
+  );
+
+  const onScrollBeginDrag = useCallback(() => setIsScrolling(true), []);
+  const onScrollEndDrag = useCallback(() => {
+    scrollRef.current?.scrollTo({ x: distanceToActivate });
+    setIsScrolling(false);
+  }, [distanceToActivate]);
+
+  if (Platform.OS !== "ios") {
+    return <View style={style}>{children}</View>;
   }
 
   return (
@@ -86,16 +138,13 @@ export default function SwipeAction(props: SwipeActionProps) {
         snapToOffsets={[distanceToActivate, distanceToActivate + width]}
         snapToStart={false}
         snapToEnd={false}
-        onScrollBeginDrag={() => setIsScrolling(true)}
-        onScrollEndDrag={() => {
-          scrollRef.current?.scrollTo({ x: distanceToActivate });
-          setIsScrolling(false);
-        }}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onScrollEndDrag={onScrollEndDrag}
         contentOffset={{ x: distanceToActivate, y: 0 }}
         onScroll={onScroll}
         scrollEventThrottle={100}
         showsHorizontalScrollIndicator={false}
-        style={{ backgroundColor: props.backgroundColor, ...props.style }}
+        style={{ backgroundColor, ...style }}
         overScrollMode="always"
       >
         <View
@@ -107,12 +156,12 @@ export default function SwipeAction(props: SwipeActionProps) {
           }}
         >
           <Icon
-            name={props.iconLeftSide[+isLeft || +isCommitted]}
-            color={props.colorLeftSide}
+            name={iconLeftSide[+isLeft || +isCommitted]}
+            color={colorLeftSide}
             size={25}
           />
         </View>
-        <View style={{ width: width }}>{props.children}</View>
+        <View style={{ width: width }}>{children}</View>
         <View
           style={{
             width: distanceToActivate,
@@ -122,8 +171,8 @@ export default function SwipeAction(props: SwipeActionProps) {
           }}
         >
           <Icon
-            name={props.iconRightSide[+isRight || +isCommitted]}
-            color={props.colorRightSide}
+            name={iconRightSide[+isRight || +isCommitted]}
+            color={colorRightSide}
             size={25}
           />
         </View>
@@ -131,3 +180,5 @@ export default function SwipeAction(props: SwipeActionProps) {
     </View>
   );
 }
+
+/* end of SwipeAction.tsx */
