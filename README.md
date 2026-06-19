@@ -2,8 +2,9 @@
 
 Hoot Mobile is a React Native / Expo client for Lotide servers. It lets a
 phone connect to a Lotide instance, browse communities, read and submit posts,
-reply to comments, manage followed communities, view notifications, and use
-profile and moderation flows.
+reply to comments, manage followed communities and source feeds, view
+notifications, follow users, exchange private messages on supported servers,
+and use profile and moderation flows.
 
 This application is not a social platform by itself. It is a mobile frontend
 for the Lotide federated community server API.
@@ -24,15 +25,38 @@ Notable current features:
     and moderation screens.
   * Mine / Everything community browsing backed by the current Lotide
     community list API.
+  * Gated Lotide 0.18 source-feed browsing through collection_targets,
+    including source details, cached source-item reading, follow/unfollow,
+    software filters, likes, and compatible source-item replies.
+  * Gated Lotide 0.18 private-message inbox and conversation threads.
+  * Gated Lotide 0.18 user follow/unfollow controls and profile messaging
+    entry points.
   * Runtime validation and normalization for Lotide API responses.
   * Current HTML rendering through react-native-render-html.
   * Android local notification polling through expo-background-task,
-    expo-task-manager, and expo-notifications.
+    expo-task-manager, and expo-notifications, including notification tap
+    routing back into related Hoot screens.
   * Native Android project files under android/.
   * Debian Android build and emulator smoke-test helpers under build_scripts/.
   * Jest, ESLint, TypeScript, npm audit, and Android release-build validation.
 
 See changelog.txt for the detailed 0.2.0 change list.
+
+## Lotide Compatibility
+
+Hoot still supports older Lotide API surfaces down to API version 8 for the
+existing community, post, comment, profile, moderation, and notification flows.
+
+Newer server features are enabled only when the active instance reports a
+compatible API version:
+
+  * API 17 or newer: user-follow notifications.
+  * API 18 or newer: source feeds, private messages, and user follow/unfollow
+    controls.
+
+Older instances keep the previous app behavior. Unsupported tabs and routes are
+hidden where possible, and direct deep links show a clear unsupported-server
+message instead of issuing requests to endpoints the server may not have.
 
 ## Screenshots
 
@@ -99,6 +123,10 @@ Run on Android through the local native project:
 npm run android
 ```
 
+The Android development command runs through build_scripts/android-env.sh so it
+uses a Java 17 JDK, the local Android SDK, and a development NODE_ENV even on a
+shell where the system default Java is newer than the Android toolchain expects.
+
 Run the web development server:
 
 ```bash
@@ -124,6 +152,7 @@ npm run lint:strict
 npm test
 npm audit --audit-level=moderate
 npx expo install --check
+npx expo-doctor
 ```
 
 The strict lint command runs ESLint with unused-disable reporting, checks
@@ -139,7 +168,19 @@ npm run test:watch
 ## Android Build Scripts
 
 The build_scripts/ directory contains Debian-focused helpers for local Android
-release builds and emulator smoke checks.
+release builds, emulator smoke checks, and local Android environment setup.
+
+Prepare an Android command with the same Java and SDK discovery used by the
+local app launch path:
+
+```bash
+./build_scripts/android-env.sh command args...
+```
+
+The helper selects an installed Java 17 JDK, finds the Android SDK from
+ANDROID_SDK_ROOT, ANDROID_HOME, ~/Android/Sdk, or ~/android-sdk, exports the
+available Android AVD directory, sets NODE_ENV=development when the caller did
+not provide one, and then executes the requested command.
 
 Build an APK:
 
@@ -193,8 +234,12 @@ The emulator helper:
 
   * finds the Android SDK from ANDROID_SDK_ROOT, ANDROID_HOME, ~/Android/Sdk,
     or ~/android-sdk;
+  * finds AVD metadata from ANDROID_AVD_HOME, XDG_CONFIG_HOME/.android/avd,
+    or ~/.android/avd;
   * installs emulator dependencies when apt-get is available;
   * creates an Android 34 Google APIs x86_64 AVD named HootTest;
+  * reports recent emulator logs if the emulator exits before ADB or boot
+    completion;
   * installs the APK with adb;
   * launches org.brokenlamp.hoot with monkey.
 
@@ -217,16 +262,37 @@ android/**/.cxx/
 Do not commit generated Gradle build output or local Android SDK files. Commit
 intentional native source/configuration changes under android/.
 
+Because android/ is checked in, Expo and EAS do not automatically sync native
+app config fields into the Android project during every build. Treat app.json
+and android/ as intentionally mirrored for native metadata such as the package
+id, app icon, splash screen, URL scheme, orientation, and native plugins. When
+one of those values changes, regenerate or review the Android project and
+commit the matching native diff. The matching Expo Doctor sync warning is
+disabled in package.json for this reason; the rest of Expo Doctor still runs.
+
 ## Notifications
 
-Android background notifications are local polling notifications. They are
-enabled from the app settings screen, require OS notification permission, and
-run when Android allows the background task to execute.
+Android notifications are local polling notifications. They are enabled from
+the app settings screen, require OS notification permission, poll when the app
+starts or resumes, and also run when Android allows the background task to
+execute.
 
 The app keeps a per-account local notification baseline so a notification can
 still be shown on the phone even if another Lotide client has already fetched
 the notification endpoint. This is not server push. If the app is force-killed,
 the operating system may not run the background task.
+
+Local alerts use the current Lotide notification channel with default sound and
+high Android importance. Android preserves channel importance after a channel
+exists, so channel ids are versioned when an upgrade needs a fresh sound or
+importance policy. When a local notification is tapped, Hoot routes reply
+notifications to the related post and highlights the reply when possible.
+User-follow notification taps open the notification list, where the row opens
+the follower profile. Private-message notifications on Lotide 0.18 servers open
+the related conversation. Enabling notifications first creates the local
+channel and asks the OS for notification permission, then creates the local
+baseline. If permission, baselining, or task registration fails, the setting is
+left disabled and the app reports the error.
 
 ## Web Output
 
@@ -236,9 +302,8 @@ The app still supports Expo web development through Metro:
 npm run web
 ```
 
-Generated static web output, when present, lives under dist/. The current
-repository state includes dist/ files for deployment, but they are generated
-artifacts rather than source code.
+Generated static web output, when present, lives under dist/. The directory is
+ignored because it is build output, not source.
 
 ## Repository Map
 
@@ -270,6 +335,11 @@ build is the compatibility gate for those packages.
 
 The project currently holds Babel on the latest 7.x line because the current
 Metro/worklets path still loads Babel 7 preset code.
+
+The npm package graph should not contain packages with npm deprecation
+metadata. Native Android builds may still print Java/Kotlin/Gradle deprecation
+warnings from Expo and React Native module internals; those are tracked through
+Expo SDK-compatible package updates rather than patched inside node_modules.
 
 ## License
 

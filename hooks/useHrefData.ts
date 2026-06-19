@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Fetch metadata for external URLs.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Request link preview data from Lotide
+        - Expose cached preview state to link components
+
+    This file intentionally does NOT contain:
+
+        - opening links
+        - HTML rendering
 */
 
 import { useMemo } from "react";

@@ -6,11 +6,16 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Read the active Lotide connection context.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Select the current API URL and login state from Redux
+
+    This file intentionally does NOT contain:
+
+        - context persistence
+        - login/logout actions
 */
 
 import { useSelector } from "react-redux";

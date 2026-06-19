@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Load paged replies for a post or comment.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Fetch first and next reply pages
+        - Store returned comment records
+        - Expose loading and failure state
+
+    This file intentionally does NOT contain:
+
+        - comment composition
+        - post list loading
 */
 
 import { useCallback, useEffect, useRef, useState } from "react";

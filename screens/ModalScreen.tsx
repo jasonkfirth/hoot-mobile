@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Show a post detail page with comments.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load the selected post
+        - Render post actions and comment tree
+        - Highlight comments from notification routes
+
+    This file intentionally does NOT contain:
+
+        - feed pagination
+        - post submission
 */
 
 import Icon from "@expo/vector-icons/Ionicons";
@@ -30,6 +37,8 @@ import { RootStackScreenProps } from "../types";
 import CommentsDisplay from "../components/CommentsDisplay";
 import usePost from "../hooks/usePost";
 import RetryState from "../components/RetryState";
+import { useLotideCtx } from "../hooks/useLotideCtx";
+import { MINIMUM_TOUCH_TARGET_SIZE, TOUCH_TARGET_HIT_SLOP } from "../constants/TouchTargets";
 
 export default function ModalScreen({
   navigation,
@@ -42,6 +51,7 @@ export default function ModalScreen({
     route.params.highlightedComments,
   );
   const theme = useTheme();
+  const ctx = useLotideCtx();
 
   if (!post) {
     return (
@@ -64,9 +74,13 @@ export default function ModalScreen({
       >
         <PostDisplay postId={post.id} navigation={navigation} showAuthor />
         <View style={styles.actions}>
-          <Icon name="bookmark-outline" size={25} color={theme.text} />
+          <View style={styles.iconButton}>
+            <Icon name="bookmark-outline" size={25} color={theme.text} />
+          </View>
           <Pressable
-            hitSlop={5}
+            accessibilityLabel="Reply to post"
+            accessibilityRole="button"
+            hitSlop={TOUCH_TARGET_HIT_SLOP}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               navigation.navigate("Comment", {
@@ -76,26 +90,36 @@ export default function ModalScreen({
                 type: "post",
               });
             }}
+            style={styles.iconButton}
           >
             <Icon name="arrow-undo-outline" size={25} color={theme.text} />
           </Pressable>
           <Pressable
-            hitSlop={5}
+            accessibilityLabel="Share post"
+            accessibilityRole="button"
+            hitSlop={TOUCH_TARGET_HIT_SLOP}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              const shareUrl = getPostShareUrl(post, ctx?.apiUrl);
               Share.share({
-                message: post.title,
-                url: `https://dev.goldandblack.xyz/p/posts/${post.id}`,
+                message: shareUrl ? `${post.title}\n${shareUrl}` : post.title,
+                url: shareUrl,
                 title: "Hoot",
               });
             }}
+            style={styles.iconButton}
           >
             <Icon name="share-outline" size={25} color={theme.text} />
           </Pressable>
         </View>
         {highlightedComments && (
-          <Pressable onPress={() => setHighlightedComments(undefined)}>
-            <Text style={{ color: theme.tint, paddingVertical: 10 }}>
+          <Pressable
+            accessibilityLabel="Show all comments"
+            accessibilityRole="button"
+            onPress={() => setHighlightedComments(undefined)}
+            style={styles.showAllComments}
+          >
+            <Text style={{ color: theme.tint }}>
               Show all comments
             </Text>
           </Pressable>
@@ -161,6 +185,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 10,
   },
+  iconButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+    minWidth: MINIMUM_TOUCH_TARGET_SIZE,
+  },
+  showAllComments: {
+    justifyContent: "center",
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+    paddingHorizontal: 15,
+  },
 });
+
+function getPostShareUrl(post: Post, apiUrl?: string): string | undefined {
+  if (post.remote_url) return post.remote_url;
+  if (!apiUrl) return undefined;
+
+  const baseUrl = apiUrl.replace(/\/api\/unstable\/?$/, "").replace(/\/$/, "");
+  if (!/^https?:\/\//.test(baseUrl)) return undefined;
+
+  return `${baseUrl}/p/posts/${post.id}`;
+}
 
 /* end of ModalScreen.tsx */

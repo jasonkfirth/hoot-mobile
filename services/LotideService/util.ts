@@ -50,6 +50,19 @@ export function hasLogin(ctx: LotideContext): boolean {
   return !!ctx.apiUrl && !!ctx.login;
 }
 
+export function isLotideHttpError(error: unknown): error is LotideError {
+  if (!(error instanceof Error)) return false;
+
+  const status = (error as LotideError).status;
+  return typeof status === "number";
+}
+
+export function isAuthenticationError(error: unknown): boolean {
+  if (!isLotideHttpError(error)) return false;
+
+  return error.status === 401 || error.status === 403;
+}
+
 /**
     Performs a request to the Lotide API.
 
@@ -65,7 +78,7 @@ export async function lotideRequest(
   ctx: LotideContext,
   method: RequestMethod,
   path: string,
-  body?: any,
+  body?: unknown,
   noLogin: boolean = false,
 ): Promise<JsonResponse> {
   if (!ctx.apiUrl) throw new Error("No API url");

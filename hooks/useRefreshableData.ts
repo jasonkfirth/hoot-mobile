@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Coordinate pull-to-refresh style loading state.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Track refresh requests
+        - Protect state updates after unmount
+        - Expose a reusable refreshing flag
+
+    This file intentionally does NOT contain:
+
+        - screen-specific API calls
+        - Redux storage
 */
 
 import { useState, useEffect, useRef } from "react";

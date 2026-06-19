@@ -137,6 +137,68 @@ ensure_avd_image() {
   "$SDKMANAGER" "$AVD_IMAGE"
 }
 
+resolve_avd_home() {
+  local avd_path=""
+
+  if [ -n "${ANDROID_AVD_HOME:-}" ] && [ -d "$ANDROID_AVD_HOME" ]; then
+    export ANDROID_AVD_HOME
+    return 0
+  fi
+
+  if [ -x "${AVDMANAGER:-}" ]; then
+    avd_path=$(
+      "$AVDMANAGER" list avd 2>/dev/null |
+        awk -v avd_name="$AVD_NAME" '
+          $1 == "Name:" && $2 == avd_name { found = 1 }
+          found && $1 == "Path:" { print $2; exit }
+        '
+    )
+  fi
+
+  if [ -n "$avd_path" ]; then
+    ANDROID_AVD_HOME=$(dirname "$avd_path")
+  elif [ -n "${XDG_CONFIG_HOME:-}" ] && [ -d "$XDG_CONFIG_HOME/.android/avd" ]; then
+    ANDROID_AVD_HOME="$XDG_CONFIG_HOME/.android/avd"
+  else
+    ANDROID_AVD_HOME="$HOME/.android/avd"
+  fi
+
+  mkdir -p "$ANDROID_AVD_HOME"
+  export ANDROID_AVD_HOME
+}
+
+avd_exists() {
+  [ -f "$ANDROID_AVD_HOME/$AVD_NAME.ini" ] &&
+    [ -d "$ANDROID_AVD_HOME/$AVD_NAME.avd" ]
+}
+
+show_emulator_log_tail() {
+  if [ -f /tmp/hoot-mobile-emulator.log ]; then
+    log "Recent emulator log output:"
+    tail -n 80 /tmp/hoot-mobile-emulator.log >&2 || true
+  fi
+}
+
+wait_for_adb_device() {
+  for _ in $(seq 1 60); do
+    if "$ADB" get-state >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if ! kill -0 "$EMULATOR_PID" >/dev/null 2>&1; then
+      log "Error: emulator exited before adb reported a device."
+      show_emulator_log_tail
+      return 1
+    fi
+
+    sleep 2
+  done
+
+  log "Error: timed out waiting for adb to see the emulator."
+  show_emulator_log_tail
+  return 1
+}
+
 EMULATOR_PID=""
 
 cleanup_emulator() {
@@ -208,9 +270,17 @@ fi
 log "Preparing Android system image..."
 "$SDKMANAGER" "$AVD_IMAGE"
 
-if [ ! -d "$HOME/.android/avd/$AVD_NAME.avd" ]; then
+resolve_avd_home
+
+if ! avd_exists; then
   log "Creating Virtual Device ($AVD_NAME)..."
   echo "no" | "$AVDMANAGER" create avd -n "$AVD_NAME" -k "$AVD_IMAGE" --force
+  resolve_avd_home
+fi
+
+if ! avd_exists; then
+  log "Error: AVD $AVD_NAME was not created under $ANDROID_AVD_HOME."
+  exit 1
 fi
 
 log "Starting emulator..."
@@ -219,14 +289,25 @@ if [ ! -x "$EMULATOR_BIN" ]; then
   exit 1
 fi
 
-"$EMULATOR_BIN" -avd "$AVD_NAME" -no-audio -no-window -no-snapshot -gpu off > /tmp/hoot-mobile-emulator.log 2>&1 &
+if [ "${HOOT_MOBILE_KEEP_EMULATOR:-0}" = "1" ]; then
+  nohup "$EMULATOR_BIN" -avd "$AVD_NAME" -no-audio -no-window -no-snapshot -gpu off > /tmp/hoot-mobile-emulator.log 2>&1 &
+else
+  "$EMULATOR_BIN" -avd "$AVD_NAME" -no-audio -no-window -no-snapshot -gpu off > /tmp/hoot-mobile-emulator.log 2>&1 &
+fi
+
 EMULATOR_PID=$!
 
 log "Waiting for emulator to boot..."
-"$ADB" wait-for-device
+wait_for_adb_device
 
 BOOT_COMPLETED=""
 for _ in $(seq 1 75); do
+  if ! kill -0 "$EMULATOR_PID" >/dev/null 2>&1; then
+    log "Error: emulator exited before boot completed."
+    show_emulator_log_tail
+    exit 1
+  fi
+
   BOOT_COMPLETED=$("$ADB" shell getprop sys.boot_completed | tr -d '\r')
   if [ "$BOOT_COMPLETED" = "1" ]; then
     break
@@ -236,6 +317,7 @@ done
 
 if [ "$BOOT_COMPLETED" != "1" ]; then
   log "Error: emulator failed to report boot completion."
+  show_emulator_log_tail
   exit 1
 fi
 

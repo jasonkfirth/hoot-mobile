@@ -6,17 +6,26 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Implement Lotide account and user endpoints.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Login, register, logout, and reset passwords
+        - Load mixed user activity pages
+
+    This file intentionally does NOT contain:
+
+        - profile screen rendering
+        - context persistence
 */
 
 import { lotideRequest, readJson } from "./util";
+import { supportsUserFollows } from "../../constants/LotideApi";
 import {
+  InvalidLotideResponseError,
   normalizePaged,
   normalizeUserThing,
+  normalizeYourFollow,
 } from "./validation";
 
 export type UserThing =
@@ -142,6 +151,42 @@ export async function getUserThings(
   )
     .then(readJson)
     .then(data => normalizePaged(data, normalizeUserThing, "user things"));
+}
+
+function requireUserFollows(ctx: LotideContext) {
+  if (!supportsUserFollows(ctx.apiVersion)) {
+    throw new Error("This Lotide server does not provide user follows.");
+  }
+}
+
+export async function followUser(
+  ctx: LotideContext,
+  userId: UserId,
+): Promise<CommunityFollow> {
+  requireUserFollows(ctx);
+
+  return lotideRequest(ctx, "POST", `users/${userId}/follow`, {
+    try_wait_for_accept: true,
+  })
+    .then(readJson)
+    .then(data => {
+      const follow = normalizeYourFollow(data);
+
+      if (!follow) {
+        throw new InvalidLotideResponseError("user follow");
+      }
+
+      return follow;
+    });
+}
+
+export async function unfollowUser(
+  ctx: LotideContext,
+  userId: UserId,
+) {
+  requireUserFollows(ctx);
+
+  return lotideRequest(ctx, "POST", `users/${userId}/unfollow`);
 }
 
 /* end of User.ts */

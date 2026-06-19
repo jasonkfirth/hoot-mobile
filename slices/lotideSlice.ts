@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Store the active Lotide connection context.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Hold API URL and login state
+        - Expose context update actions
+
+    This file intentionally does NOT contain:
+
+        - persistent storage
+        - network requests
 */
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";

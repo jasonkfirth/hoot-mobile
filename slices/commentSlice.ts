@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Store normalized comment state in Redux.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Upsert single and multiple comments
+        - Track expanded comment actions
+        - Update optimistic comment votes
+
+    This file intentionally does NOT contain:
+
+        - network requests
+        - component rendering
 */
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";

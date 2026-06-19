@@ -24,7 +24,8 @@
 */
 
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Pressable, ScrollView, StyleSheet } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet } from "react-native";
+import AppButton from "../components/AppButton";
 import ActorDisplayComponent from "../components/ActorDisplay";
 import RetryState from "../components/RetryState";
 import SuggestLogin from "../components/SuggestLogin";
@@ -34,6 +35,7 @@ import { useLotideCtx } from "../hooks/useLotideCtx";
 import * as LotideService from "../services/LotideService";
 import type { CommunityFlag } from "../services/LotideService";
 import { RootStackScreenProps } from "../types";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 /* ------------------------------------------------------------------------- */
 /* Moderation Screen                                                         */
@@ -265,7 +267,7 @@ function FlagItem({
         ) : null}
       </Pressable>
       <View style={styles.flagActions}>
-        <Button
+        <AppButton
           title="Dismiss"
           color={theme.tint}
           onPress={() => onDismiss(flag.id)}
@@ -288,8 +290,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   tab: {
+    alignItems: "center",
     borderRadius: 8,
+    justifyContent: "center",
     marginRight: 8,
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },

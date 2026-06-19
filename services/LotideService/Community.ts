@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Implement Lotide community and moderation endpoints.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - List, load, create, edit, follow, and unfollow communities
+        - Load moderated communities and flags
+        - Normalize community API responses
+
+    This file intentionally does NOT contain:
+
+        - screen state
+        - post endpoints
 */
 
 import { lotideRequest, readJson } from "./util";
@@ -35,6 +42,8 @@ export type CommunityFlag = {
     title: string;
   };
 };
+
+const MAX_COMMUNITY_LIST_PAGES = 50;
 
 export async function getCommunities(
   ctx: LotideContext,
@@ -62,6 +71,43 @@ export async function getCommunities(
   )
     .then(readJson)
     .then(data => normalizePaged(data, normalizeCommunity, "communities"));
+}
+
+export async function getAllCommunities(
+  ctx: LotideContext,
+  onlyFollowing: boolean = false,
+): Promise<Community[]> {
+  const out: Community[] = [];
+  const seenPages = new Set<string>();
+  let nextPage: string | null | undefined;
+  let pageCount = 0;
+
+  do {
+    if (nextPage) {
+      if (seenPages.has(nextPage)) {
+        throw new Error("Lotide community pagination loop detected.");
+      }
+
+      seenPages.add(nextPage);
+    }
+
+    const page = await getCommunities(ctx, onlyFollowing, nextPage ?? undefined);
+    out.push(...page.items);
+    nextPage = page.next_page;
+    pageCount++;
+
+    /*
+        Community lists are loaded for picker-style UI, not archival export.
+
+        A hard page cap prevents a malformed server cursor from turning a
+        foreground screen into an unbounded request loop.
+    */
+    if (nextPage && pageCount >= MAX_COMMUNITY_LIST_PAGES) {
+      throw new Error("Lotide community pagination exceeded the safety limit.");
+    }
+  } while (nextPage);
+
+  return out;
 }
 
 function getCommunityPageQuery(page: string): string {

@@ -26,6 +26,7 @@ import {
   dismissCommunityFlag,
   editCommunity,
   followCommunity,
+  getAllCommunities,
   getCommunities,
   getCommunity,
   getCommunityFlags,
@@ -106,6 +107,50 @@ describe("Community service", () => {
         method: "GET",
       }),
     );
+  });
+
+  test("loads all community pages with cursor safety", async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          items: [community({ id: 7, name: "first" })],
+          next_page: "2",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          items: [community({ id: 8, name: "second" })],
+          next_page: null,
+        }),
+      });
+
+    const communities = await getAllCommunities(ctx, false);
+
+    expect(communities.map(item => item.id)).toEqual([7, 8]);
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      2,
+      "https://lotide.fbxl.net/api/unstable/communities?scope=everything&include_your=true&limit=150&sort=alphabetic&page_number=2",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+  });
+
+  test("rejects repeated community pagination cursors", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        items: [community()],
+        next_page: "2",
+      }),
+    });
+
+    await expect(getAllCommunities(ctx, false)).rejects.toThrow(
+      "pagination loop",
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
   test("allows public community browsing without a login", async () => {

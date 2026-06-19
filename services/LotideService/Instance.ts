@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Load and normalize Lotide instance metadata.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Fetch instance information
+        - Parse API version from software version
+        - Fill safe defaults for older instances
+
+    This file intentionally does NOT contain:
+
+        - host selection UI
+        - login state
 */
 
 import { lotideRequest, readJson } from "./util";

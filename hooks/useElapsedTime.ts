@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Compute elapsed time text for timestamps.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Convert timestamps into compact relative labels
+        - Refresh elapsed text while components are mounted
+
+    This file intentionally does NOT contain:
+
+        - timestamp rendering styles
+        - server time synchronization
 */
 
 import { useMemo } from "react";

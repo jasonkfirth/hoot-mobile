@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Read and refresh a single comment from Redux and Lotide.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Select cached comment data
+        - Fetch missing comments
+        - Support explicit reload attempts
+
+    This file intentionally does NOT contain:
+
+        - comment child pagination
+        - post fetching
 */
 
 import { useEffect } from "react";
@@ -43,7 +50,7 @@ export default function useComment(
         .then(comments => {
           dispatch(setCommentMulti(comments));
         })
-        .catch(() => console.log(`Comment ${commentId} could not be loaded`));
+        .catch(() => undefined);
     }
   }, [comment, commentId, ctx, dispatch, reloadId]);
 

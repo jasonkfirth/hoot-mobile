@@ -6,23 +6,34 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Render the fallback route for unknown links.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Explain that the route is missing
+        - Offer navigation back to the root screen
+
+    This file intentionally does NOT contain:
+
+        - deep link configuration
+        - error recovery for API calls
 */
 
 import * as React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { RootStackScreenProps } from '../types';
+import { MINIMUM_TOUCH_TARGET_SIZE } from '../constants/TouchTargets';
 
 export default function NotFoundScreen({ navigation }: RootStackScreenProps<'NotFound'>) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>This screen doesn&apos;t exist.</Text>
-      <TouchableOpacity onPress={() => navigation.replace('Root')} style={styles.link}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        onPress={() => navigation.replace('Root')}
+        style={styles.link}
+      >
         <Text style={styles.linkText}>Go to home screen!</Text>
       </TouchableOpacity>
     </View>
@@ -42,7 +53,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   link: {
+    alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 15,
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+    minWidth: 120,
     paddingVertical: 15,
   },
   linkText: {

@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Normalize the platform color-scheme value for app themes.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Return only light or dark
+        - Avoid nullable platform color values leaking into theme code
+
+    This file intentionally does NOT contain:
+
+        - theme token definitions
+        - settings storage
 */
 
 import { useColorScheme as _useColorScheme } from 'react-native';

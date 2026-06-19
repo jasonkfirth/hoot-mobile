@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Implement Lotide post endpoints.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load post details and feed pages
+        - Submit new posts
+        - Apply and remove post votes
+
+    This file intentionally does NOT contain:
+
+        - comment endpoints
+        - React state
 */
 
 import { lotideRequest, readJson } from "./util";

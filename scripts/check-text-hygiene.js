@@ -15,6 +15,7 @@
         - Skip binary assets and generated binary artifacts.
         - Report trailing whitespace, missing final newlines, and merge
           conflict markers.
+        - Report tab characters in source, config, and documentation files.
 
     This file intentionally does NOT contain:
 
@@ -47,6 +48,26 @@ const binaryExtensions = new Set([
   ".zip",
 ]);
 
+const noTabExtensions = new Set([
+  ".css",
+  ".d.ts",
+  ".gradle",
+  ".html",
+  ".js",
+  ".json",
+  ".jsx",
+  ".md",
+  ".properties",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".xml",
+]);
+
+const skippedPathPrefixes = [
+  "dist/",
+];
+
 function gitVisibleFiles() {
   const result = spawnSync(
     "git",
@@ -78,7 +99,19 @@ function isBinaryFile(fileName, data) {
   return data.includes(0);
 }
 
+function disallowsTabs(fileName) {
+  return noTabExtensions.has(extensionOf(fileName));
+}
+
+function shouldSkipTextHygiene(fileName) {
+  return skippedPathPrefixes.some(prefix => fileName.startsWith(prefix));
+}
+
 function checkFile(fileName, problems) {
+  if (shouldSkipTextHygiene(fileName)) {
+    return;
+  }
+
   if (!fs.existsSync(fileName)) {
     return;
   }
@@ -94,6 +127,7 @@ function checkFile(fileName, problems) {
   }
 
   const lines = data.toString("utf8").split("\n");
+  const checkTabs = disallowsTabs(fileName);
 
   lines.forEach((rawLine, index) => {
     if (index === lines.length - 1 && rawLine === "") {
@@ -105,6 +139,10 @@ function checkFile(fileName, problems) {
 
     if (/[ \t]+$/.test(line)) {
       problems.push(`${fileName}:${lineNumber}: trailing whitespace`);
+    }
+
+    if (checkTabs && line.includes("\t")) {
+      problems.push(`${fileName}:${lineNumber}: tab character`);
     }
 
     if (

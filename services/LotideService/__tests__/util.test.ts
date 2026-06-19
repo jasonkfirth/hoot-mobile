@@ -21,7 +21,7 @@
         • Live network integration tests
 */
 
-import { lotideRequest, readJson } from "../util";
+import { isAuthenticationError, lotideRequest, readJson } from "../util";
 
 describe("Lotide service utilities", () => {
   beforeEach(() => {
@@ -96,6 +96,22 @@ describe("Lotide service utilities", () => {
       method: "GET",
       path: "https://lotide.fbxl.net/api/unstable/instance",
     });
+  });
+
+  test("identifies authentication failures by HTTP status", () => {
+    const unauthorized = new Error("unauthorized") as Error & { status: number };
+    unauthorized.status = 401;
+
+    const forbidden = new Error("forbidden") as Error & { status: number };
+    forbidden.status = 403;
+
+    const serverError = new Error("server exploded") as Error & { status: number };
+    serverError.status = 500;
+
+    expect(isAuthenticationError(unauthorized)).toBe(true);
+    expect(isAuthenticationError(forbidden)).toBe(true);
+    expect(isAuthenticationError(serverError)).toBe(false);
+    expect(isAuthenticationError(new Error("offline"))).toBe(false);
   });
 
   test("does not issue authenticated requests without a login", async () => {

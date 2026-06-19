@@ -51,6 +51,7 @@ describe("transformToFullNotification", () => {
 
     expect(out).toEqual({
       unseen: true,
+      notificationType: "post_reply",
       commentId: 44,
       origin: {
         type: "post",
@@ -58,6 +59,46 @@ describe("transformToFullNotification", () => {
       },
       postId: 13,
     });
+  });
+
+  test("keeps embedded post and reply data from Lotide notifications", () => {
+    const out = transformToFullNotification({
+      type: "post_reply",
+      unseen: true,
+      reply: {
+        id: 44,
+        content_text: "Fresh reply",
+        created: "2026-06-18T12:00:00Z",
+        score: 0,
+        author: {
+          id: 3,
+          username: "commenter",
+          host: "lotide.fbxl.net",
+          local: true,
+        },
+      },
+      post: {
+        id: 13,
+        title: "Notification target",
+        created: "2026-06-18T11:00:00Z",
+        replies_count_total: 1,
+        score: 5,
+      },
+    });
+
+    expect(out).toEqual(
+      expect.objectContaining({
+        post: expect.objectContaining({
+          id: 13,
+          title: "Notification target",
+          score: 5,
+        }),
+        reply: expect.objectContaining({
+          id: 44,
+          content_text: "Fresh reply",
+        }),
+      }),
+    );
   });
 
   test("transforms Lotide comment reply notifications", () => {
@@ -77,6 +118,7 @@ describe("transformToFullNotification", () => {
 
     expect(out).toEqual({
       unseen: false,
+      notificationType: "comment_reply",
       commentId: 45,
       origin: {
         type: "comment",
@@ -100,6 +142,7 @@ describe("transformToFullNotification", () => {
 
     expect(out).toEqual({
       unseen: true,
+      notificationType: "comment_mention",
       commentId: 45,
       origin: {
         type: "comment",
@@ -120,6 +163,7 @@ describe("transformToFullNotification", () => {
 
     expect(out).toEqual({
       unseen: false,
+      notificationType: "legacy",
       commentId: 13,
       origin: {
         type: "post",
@@ -142,6 +186,7 @@ describe("transformToFullNotification", () => {
 
     expect(out).toEqual({
       unseen: true,
+      notificationType: "legacy",
       commentId: 44,
       origin: {
         type: "comment",
@@ -201,6 +246,90 @@ describe("transformToFullNotification", () => {
     expect(out).toBeUndefined();
   });
 
+  test("supports private message notifications on Lotide 0.18+", () => {
+    const out = transformToFullNotification(
+      {
+        type: "private_message",
+        unseen: true,
+        message: {
+          id: 33,
+          author: {
+            id: 2,
+            username: "remote",
+            local: false,
+            host: "remote.example",
+            is_bot: false,
+          },
+          recipient: {
+            id: 1,
+            username: "sj_zero",
+            local: true,
+            host: "lotide.example",
+            is_bot: false,
+          },
+          created: "2026-06-18T12:00:00Z",
+          local: false,
+          remote_url: "https://remote.example/messages/33",
+          content_text: "hello",
+          content_markdown: null,
+          content_html: "<p>hello</p>",
+          in_reply_to: null,
+          federation_status: "received",
+          sensitive: false,
+        },
+      },
+      18,
+    );
+
+    expect(out).toEqual(
+      expect.objectContaining({
+        unseen: true,
+        kind: "private_message",
+        message: expect.objectContaining({
+          id: 33,
+          content_html: "<p>hello</p>",
+          federation_status: "received",
+        }),
+      }),
+    );
+  });
+
+  test("ignores private message notifications on pre-0.18 servers", () => {
+    const out = transformToFullNotification(
+      {
+        type: "private_message",
+        unseen: true,
+        message: {
+          id: 33,
+          author: {
+            id: 2,
+            username: "remote",
+            local: false,
+            host: "remote.example",
+            is_bot: false,
+          },
+          recipient: {
+            id: 1,
+            username: "sj_zero",
+            local: true,
+            host: "lotide.example",
+            is_bot: false,
+          },
+          created: "2026-06-18T12:00:00Z",
+          local: false,
+          content_text: "hello",
+          content_markdown: null,
+          content_html: "<p>hello</p>",
+          in_reply_to: null,
+          sensitive: false,
+        },
+      },
+      17,
+    );
+
+    expect(out).toBeUndefined();
+  });
+
   test("drops unknown and malformed notification entries", () => {
     const out = normalizeNotificationList({
       items: [
@@ -214,6 +343,7 @@ describe("transformToFullNotification", () => {
     expect(out).toEqual([
       {
         unseen: false,
+        notificationType: "post_mention",
         commentId: 2,
         origin: {
           type: "post",
@@ -237,6 +367,7 @@ describe("transformToFullNotification", () => {
     expect(out).toEqual([
       {
         unseen: false,
+        notificationType: "legacy",
         commentId: 13,
         origin: {
           type: "post",
@@ -279,6 +410,7 @@ describe("transformToFullNotification", () => {
     expect(out).toEqual([
       {
         unseen: true,
+        notificationType: "post_mention",
         commentId: 99,
         origin: {
           type: "post",

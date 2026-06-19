@@ -28,7 +28,7 @@ import configureStoreMock from "redux-mock-store";
 
 import SearchScreen from "../SearchScreen";
 
-const mockGetCommunities = jest.fn();
+const mockGetAllCommunities = jest.fn();
 
 jest.mock("../../hooks/useTheme", () => ({
   __esModule: true,
@@ -45,7 +45,7 @@ jest.mock("../../hooks/useTheme", () => ({
 jest.mock("../../services/LotideService", () => ({
   __esModule: true,
   ...jest.requireActual("../../services/LotideService"),
-  getCommunities: (...args: unknown[]) => mockGetCommunities(...args),
+  getAllCommunities: (...args: unknown[]) => mockGetAllCommunities(...args),
 }));
 
 const mockStore = configureStoreMock([]);
@@ -74,36 +74,35 @@ async function renderSearchScreen() {
 describe("SearchScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetCommunities.mockImplementation(
+    mockGetAllCommunities.mockImplementation(
       (_ctx: LotideContext, onlyFollowing: boolean) =>
-        Promise.resolve({
-          items: onlyFollowing
+        Promise.resolve(
+          onlyFollowing
             ? [
-                {
-                  id: 1,
-                  name: "lotide",
-                  host: "lotide.fbxl.net",
-                  local: false,
-                  your_follow: { accepted: true },
-                },
-              ]
+              {
+                id: 1,
+                name: "lotide",
+                host: "lotide.fbxl.net",
+                local: false,
+                your_follow: { accepted: true },
+              },
+            ]
             : [
-                {
-                  id: 1,
-                  name: "lotide",
-                  host: "lotide.fbxl.net",
-                  local: false,
-                  your_follow: { accepted: true },
-                },
-                {
-                  id: 2,
-                  name: "narwhal",
-                  host: "narwhal.city",
-                  local: false,
-                },
-              ],
-          next_page: null,
-        }),
+              {
+                id: 1,
+                name: "lotide",
+                host: "lotide.fbxl.net",
+                local: false,
+                your_follow: { accepted: true },
+              },
+              {
+                id: 2,
+                name: "narwhal",
+                host: "narwhal.city",
+                local: false,
+              },
+            ],
+        ),
     );
   });
 
@@ -111,7 +110,7 @@ describe("SearchScreen", () => {
     const { screen } = await renderSearchScreen();
 
     await waitFor(() => {
-      expect(mockGetCommunities).toHaveBeenCalledWith(
+      expect(mockGetAllCommunities).toHaveBeenCalledWith(
         expect.objectContaining({
           login: { token: "token-1" },
         }),
@@ -135,7 +134,7 @@ describe("SearchScreen", () => {
     );
 
     await waitFor(() => {
-      expect(mockGetCommunities).toHaveBeenLastCalledWith(
+      expect(mockGetAllCommunities).toHaveBeenLastCalledWith(
         expect.objectContaining({
           login: { token: "token-1" },
         }),

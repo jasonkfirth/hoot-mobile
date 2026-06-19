@@ -28,10 +28,15 @@ declare global {
   type PostId = number;
   type CommentId = number;
   type CommunityId = number;
+  type CollectionTargetId = number;
+  type CollectionTargetItemId = number;
+  type PrivateMessageId = number;
 
   type ContentType = "post" | "comment";
   type SortOption = "hot" | "new" | "top";
   type FederationStatus = "unsent" | "sent" | "received" | "posted";
+  type CollectionTargetScope = "mine" | "everything";
+  type CollectionTargetSort = "alphabetic" | "latest" | "items" | "software";
 
   type Paged<T> = {
     items: T[];
@@ -60,6 +65,7 @@ declare global {
     is_bot?: boolean;
     remote_url?: string;
     suspended?: boolean;
+    your_follow?: CommunityFollow;
     your_note?: ContentBlock;
     [key: string]: unknown;
   };
@@ -98,6 +104,110 @@ declare global {
     you_are_moderator?: boolean;
     your_follow?: CommunityFollow;
     [key: string]: unknown;
+  };
+
+  type CollectionTargetOwner = {
+    id?: UserId | null;
+    remote_url?: string | null;
+  };
+
+  type CollectionTargetSoftwareCount = {
+    software: string;
+    count: number;
+  };
+
+  type CollectionTargetListItem = {
+    id: CollectionTargetId;
+    type: string;
+    software: string;
+    name: string;
+    remote_url: string;
+    owner: CollectionTargetOwner;
+    total_items?: number | null;
+    preview_item_count: number;
+    latest_preview_item?: string | null;
+    latest_preview_published?: string | null;
+    latest_preview_url?: string | null;
+    summary_excerpt?: string | null;
+    your_follow?: CommunityFollow;
+    latest_unfollow_status?: FederationStatus;
+    [key: string]: unknown;
+  };
+
+  type CollectionTargetPreviewItem = {
+    id: CollectionTargetItemId;
+    ap_id: string;
+    type?: string | null;
+    name: string;
+    url?: string | null;
+    attributed_to?: string | null;
+    content_html?: string | null;
+    summary_html?: string | null;
+    image_url?: string | null;
+    published?: string | null;
+    your_vote?: boolean;
+    federation_status?: FederationStatus;
+    [key: string]: unknown;
+  };
+
+  type CollectionTarget = {
+    id: CollectionTargetId;
+    type: string;
+    software?: string | null;
+    name: string;
+    remote_url: string;
+    owner: CollectionTargetOwner;
+    followers?: string | null;
+    first_page?: string | null;
+    last_page?: string | null;
+    summary_html?: string | null;
+    total_items?: number | null;
+    your_follow?: CommunityFollow;
+    latest_unfollow_status?: FederationStatus;
+    preview_item_likes_supported: boolean;
+    preview_items: CollectionTargetPreviewItem[];
+    [key: string]: unknown;
+  };
+
+  type CollectionTargetItemCollection = {
+    id: CollectionTargetId;
+    type: string;
+    software?: string | null;
+    name: string;
+    remote_url: string;
+    owner: CollectionTargetOwner;
+    preview_item_likes_supported: boolean;
+    preview_item_replies_supported: boolean;
+    can_reply: boolean;
+    [key: string]: unknown;
+  };
+
+  type CollectionTargetItemComment = {
+    id: CommentId;
+    remote_url?: string | null;
+    content_text?: string | null;
+    content_markdown?: string | null;
+    content_html?: string | null;
+    created: string;
+    local: boolean;
+    author?: Profile;
+    sensitive: boolean;
+    federation_status?: FederationStatus;
+    [key: string]: unknown;
+  };
+
+  type CollectionTargetItem = {
+    collection: CollectionTargetItemCollection;
+    item: CollectionTargetPreviewItem;
+    comments: CollectionTargetItemComment[];
+  };
+
+  type CollectionTargetList = {
+    items: CollectionTargetListItem[];
+    next_page: string | null;
+    total_count: number;
+    scope_total_count: number;
+    software_counts: CollectionTargetSoftwareCount[];
   };
 
   type Post = {
@@ -152,6 +262,22 @@ declare global {
     [key: string]: unknown;
   };
 
+  type PrivateMessage = {
+    id: PrivateMessageId;
+    author: Profile;
+    recipient: Profile;
+    created: string;
+    local: boolean;
+    remote_url?: string | null;
+    content_text?: string | null;
+    content_markdown?: string | null;
+    content_html?: string | null;
+    in_reply_to?: PrivateMessageId | null;
+    federation_status?: FederationStatus;
+    sensitive: boolean;
+    [key: string]: unknown;
+  };
+
   type LotideContext = {
     apiUrl?: string;
     apiVersion?: number;
@@ -174,12 +300,21 @@ declare global {
   type ReplyNotification = {
     unseen: boolean;
     kind?: "reply";
+    notificationType?:
+      | "post_reply"
+      | "post_mention"
+      | "comment_reply"
+      | "comment_mention"
+      | "legacy";
     commentId: CommentId;
     origin: {
       type: ContentType;
       id: PostId | CommentId;
     };
     postId: PostId;
+    post?: Post;
+    reply?: Comment;
+    comment?: Comment;
   };
 
   type UserFollowNotification = {
@@ -188,7 +323,16 @@ declare global {
     actor?: Profile;
   };
 
-  type FullNotification = ReplyNotification | UserFollowNotification;
+  type PrivateMessageNotification = {
+    unseen: boolean;
+    kind: "private_message";
+    message: PrivateMessage;
+  };
+
+  type FullNotification =
+    | ReplyNotification
+    | UserFollowNotification
+    | PrivateMessageNotification;
 
   type HrefData = {
     imageUrl?: string;
@@ -201,7 +345,7 @@ declare global {
   const document: {
     addEventListener: (
       eventName: string,
-      listener: (...args: any[]) => void,
+      listener: (...args: unknown[]) => void,
       options?: boolean | unknown,
     ) => void;
   };

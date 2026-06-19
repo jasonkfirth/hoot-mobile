@@ -21,7 +21,11 @@
         • Network integration tests against a live Lotide node
 */
 
-import { getUserThings } from "../User";
+import {
+  followUser,
+  getUserThings,
+  unfollowUser,
+} from "../User";
 
 describe("User service", () => {
   beforeEach(() => {
@@ -150,6 +154,56 @@ describe("User service", () => {
         1,
       ),
     ).rejects.toThrow("Invalid Lotide API response");
+  });
+
+  test("follows and unfollows users on Lotide 0.18 servers", async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          accepted: false,
+          federation_status: "sent",
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    const ctx = {
+      apiUrl: "https://lotide.fbxl.net/api/unstable",
+      apiVersion: 18,
+      login: { token: "token-1" },
+    };
+
+    await expect(followUser(ctx, 2)).resolves.toEqual({
+      accepted: false,
+      federation_status: "sent",
+    });
+    await unfollowUser(ctx, 2);
+
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      1,
+      "https://lotide.fbxl.net/api/unstable/users/2/follow",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ try_wait_for_accept: true }),
+      }),
+    );
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      2,
+      "https://lotide.fbxl.net/api/unstable/users/2/unfollow",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  test("blocks user-follow calls on older servers", async () => {
+    global.fetch = jest.fn();
+
+    await expect(followUser({
+      apiUrl: "https://lotide.fbxl.net/api/unstable",
+      apiVersion: 17,
+      login: { token: "token-1" },
+    }, 2)).rejects.toThrow("user follows");
+
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 

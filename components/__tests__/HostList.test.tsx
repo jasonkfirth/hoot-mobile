@@ -129,8 +129,8 @@ describe("HostList", () => {
 
   test("does not select hosts whose API version is too old", async () => {
     mockGetInstanceInfo.mockResolvedValue({
-      software: { name: "Lotide", version: "0.8.0" },
-      apiVersion: 8,
+      software: { name: "Lotide", version: "0.7.0" },
+      apiVersion: 7,
     });
     const onSelect = jest.fn();
 
@@ -148,6 +148,25 @@ describe("HostList", () => {
     });
     await fireEvent.press(lotideButton);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  test("selects hosts at the minimum supported API version", async () => {
+    mockGetInstanceInfo.mockResolvedValue({
+      software: { name: "Lotide", version: "0.8.0" },
+      apiVersion: 8,
+    });
+    const onSelect = jest.fn();
+
+    const screen = await renderWithStore(<HostList onSelect={onSelect} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Lotide 0.8.0")).toHaveLength(3);
+    });
+
+    await fireEvent.press(
+      screen.getByRole("button", { name: "Select host FBXL Lotide" }),
+    );
+    expect(onSelect).toHaveBeenCalledWith("lotide.fbxl.net", "FBXL Lotide");
   });
 
   test("submits a typed custom host in lowercase", async () => {

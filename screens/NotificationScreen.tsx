@@ -98,6 +98,8 @@ export default function NotificationScreen({
       keyExtractor={(item, index) =>
         item.kind === "user_follow"
           ? `user_follow-${item.actor?.id ?? index}`
+          : item.kind === "private_message"
+          ? `private_message-${item.message.id}`
           : `${item.commentId}-${index}`
       }
       refreshing={isRefreshing}
@@ -128,21 +130,41 @@ const Item = ({ item }: { item: FullNotification }) => {
     return <UserFollowItem item={item} />;
   }
 
+  if (item.kind === "private_message") {
+    return <PrivateMessageItem item={item} />;
+  }
+
   return <ReplyItem item={item} />;
 };
 
 const UserFollowItem = ({ item }: { item: UserFollowNotification }) => {
   const theme = useTheme();
+  const navigation =
+    useNavigation<RootStackScreenProps<"ProfileActivity">["navigation"]>();
   const followActor = item.actor;
 
   return (
-    <View
+    <Pressable
+      accessibilityLabel={
+        followActor
+          ? `Open profile for ${followActor.username}`
+          : "Open follower profile"
+      }
+      accessibilityRole="button"
       style={[
         styles.item,
         {
           borderBottomColor: theme.secondaryBackground,
         },
       ]}
+      onPress={() => {
+        if (!followActor) return;
+
+        navigation.navigate("ProfileActivity", {
+          userId: followActor.id,
+          username: followActor.username,
+        });
+      }}
     >
       <Text style={{ color: theme.secondaryText, fontSize: 12, marginBottom: 5 }}>
         New follower
@@ -159,27 +181,159 @@ const UserFollowItem = ({ item }: { item: UserFollowNotification }) => {
       ) : (
         <Text style={{ color: theme.secondaryText }}>Unknown actor</Text>
       )}
-    </View>
+    </Pressable>
   );
 };
 
+const PrivateMessageItem = ({ item }: { item: PrivateMessageNotification }) => {
+  const ctx = useLotideCtx();
+  const theme = useTheme();
+  const navigation =
+    useNavigation<RootStackScreenProps<"MessageThread">["navigation"]>();
+  const partner = LotideService.getPrivateMessagePartner(
+    item.message,
+    ctx?.login?.user?.id,
+  );
+
+  return (
+    <Pressable
+      accessibilityLabel={`Open message from ${partner.username}`}
+      accessibilityRole="button"
+      style={[
+        styles.item,
+        {
+          borderBottomColor: theme.secondaryBackground,
+        },
+      ]}
+      onPress={() =>
+        navigation.navigate("MessageThread", {
+          userId: partner.id,
+          username: partner.username,
+        })
+      }
+    >
+      <Text style={{ color: theme.secondaryText, fontSize: 12, marginBottom: 5 }}>
+        New private message
+      </Text>
+      <ActorDisplayComponent
+        name={partner.username}
+        host={partner.host}
+        local={partner.local ?? false}
+        showHost="only_foreign"
+        colorize="only_foreign"
+        userId={partner.id}
+      />
+      <View
+        style={[
+          styles.level1,
+          {
+            borderColor: theme.tint,
+            backgroundColor: theme.secondaryBackground,
+          },
+        ]}
+      >
+        <ContentDisplay
+          contentHtml={item.message.content_html}
+          contentMarkdown={item.message.content_markdown}
+          contentText={item.message.content_text}
+          maxChars={240}
+        />
+      </View>
+    </Pressable>
+  );
+};
+
+function notificationItemLabel(item: ReplyNotification): string {
+  if (item.notificationType === "post_mention") {
+    return "New mention in a Post";
+  }
+
+  if (item.notificationType === "comment_mention") {
+    return "New mention in a Comment";
+  }
+
+  return `New reply to your ${item.origin.type === "post" ? "Post" : "Comment"}`;
+}
+
 const ReplyItem = ({ item }: { item: ReplyNotification }) => {
-  const post = usePost(item.postId);
+  const cachedPost = usePost(item.postId);
   const itemOriginType = item.origin.type;
-  const comment = useComment(
+  const cachedComment = useComment(
     itemOriginType === "comment" ? item.commentId : undefined,
   );
-  const originComment = useComment(
+  const cachedOriginComment = useComment(
     itemOriginType === "comment" ? item.origin.id : undefined,
   );
   const theme = useTheme();
   const navigation = useNavigation<RootStackScreenProps<"Post">["navigation"]>();
+  const post = item.post ?? cachedPost;
+  const comment = item.reply ?? cachedComment;
+  const originComment = item.comment ?? cachedOriginComment;
+  const label = notificationItemLabel(item);
+  const title = post?.title ?? `Post ${item.postId}`;
 
-  if (!post) return null;
+  const openPost = () => {
+    const highlightedComments =
+      itemOriginType === "comment" && item.origin
+        ? [item.origin.id, item.commentId]
+        : item.commentId !== item.postId
+        ? [item.commentId]
+        : undefined;
+
+    navigation.navigate("Post", {
+      postId: item.postId,
+      highlightedComments,
+    });
+  };
+
+  if (!post) {
+    return (
+      <Pressable
+        accessibilityLabel={`Open notification for ${title}`}
+        accessibilityRole="button"
+        style={[
+          styles.item,
+          {
+            borderBottomColor: theme.secondaryBackground,
+          },
+        ]}
+        onPress={openPost}
+      >
+        <Text style={{ color: theme.secondaryText, fontSize: 12, marginBottom: 5 }}>
+          {label}
+        </Text>
+        <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
+        <Text style={{ color: theme.secondaryText, marginTop: 5 }}>
+          Open the post to view the latest activity.
+        </Text>
+      </Pressable>
+    );
+  }
+
   const author = post.author;
   const community = post.community;
   if (itemOriginType === "comment" && (!comment || !originComment)) {
-    return null;
+    return (
+      <Pressable
+        accessibilityLabel={`Open notification for ${title}`}
+        accessibilityRole="button"
+        style={[
+          styles.item,
+          {
+            borderBottomColor: theme.secondaryBackground,
+          },
+        ]}
+        onPress={openPost}
+      >
+        <Text style={{ color: theme.secondaryText, fontSize: 12, marginBottom: 5 }}>
+          {label}
+        </Text>
+        <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
+        <Text style={{ color: theme.secondaryText, marginTop: 5 }}>
+          Open the post to view the latest reply.
+        </Text>
+      </Pressable>
+    );
   }
 
   if (itemOriginType === "post" && !comment) {
@@ -193,20 +347,14 @@ const ReplyItem = ({ item }: { item: ReplyNotification }) => {
             borderBottomColor: theme.secondaryBackground,
           },
         ]}
-        onPress={() => {
-          navigation.navigate("Post", {
-            postId: item.postId,
-            highlightedComments:
-              item.commentId !== item.postId ? [item.commentId] : undefined,
-          });
-        }}
+        onPress={openPost}
       >
         <Text
           style={{ color: theme.secondaryText, fontSize: 12, marginBottom: 5 }}
         >
-          New reply to your Post
+          {label}
         </Text>
-        <Text style={[styles.title, { color: theme.text }]}>{post.title}</Text>
+        <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
         <View
           style={[
             styles.level1,
@@ -235,7 +383,9 @@ const ReplyItem = ({ item }: { item: ReplyNotification }) => {
     );
   }
 
-  if (!comment) return null;
+  if (!comment) {
+    return null;
+  }
 
   return (
     <Pressable
@@ -247,23 +397,14 @@ const ReplyItem = ({ item }: { item: ReplyNotification }) => {
           borderBottomColor: theme.secondaryBackground,
         },
       ]}
-      onPress={() => {
-        const highlightedComments =
-          itemOriginType === "comment" && item.origin
-            ? [item.origin.id, item.commentId]
-            : [item.commentId];
-        navigation.navigate("Post", {
-          postId: item.postId,
-          highlightedComments,
-        });
-      }}
+      onPress={openPost}
     >
       <Text
         style={{ color: theme.secondaryText, fontSize: 12, marginBottom: 5 }}
       >
-        New reply to your {itemOriginType === "post" ? "Post" : "Comment"}
+        {label}
       </Text>
-      <Text style={[styles.title, { color: theme.text }]}>{post.title}</Text>
+      <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
       {author ? (
         <ActorDisplayComponent
               name={author.username}
@@ -276,7 +417,9 @@ const ReplyItem = ({ item }: { item: ReplyNotification }) => {
       ) : (
         <Text>Unknown author</Text>
       )}
-      {itemOriginType === "comment" && originComment ? (
+      {itemOriginType === "comment" &&
+      originComment &&
+      originComment.id !== comment.id ? (
         <>
           <View style={[styles.level1, { borderColor: theme.secondaryText }]}>
             <ActorOrUnknown actor={originComment.author} />

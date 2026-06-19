@@ -8,6 +8,7 @@ npm-debug.*
 *.mobileprovision
 *.orig.*
 web-build/
+dist/
 
 # Native build outputs
 android/.gradle/

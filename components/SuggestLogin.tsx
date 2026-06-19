@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Prompt anonymous users to choose a host and sign in.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Show the login call-to-action
+        - Coordinate host selection before showing the login form
+
+    This file intentionally does NOT contain:
+
+        - credential storage
+        - post-login navigation
 */
 
 import React, { useState } from "react";

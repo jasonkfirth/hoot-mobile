@@ -39,9 +39,24 @@ export type RootStackParamList = {
   ForgotPassword: { node: string };
   ProfileActivity: { userId?: UserId; username?: string };
   Moderation: undefined;
+  CollectionTarget: {
+    id: CollectionTargetId | string;
+    source?: Partial<CollectionTarget> | Partial<CollectionTargetListItem>;
+  };
+  CollectionTargetItem: {
+    collectionTargetId: CollectionTargetId | string;
+    itemId: CollectionTargetItemId | string;
+    title?: string;
+  };
+  MessageThread: {
+    userId: UserId | string;
+    username?: string;
+  };
 
   FeedScreen: { sort: SortOption };
   SearchScreen: undefined;
+  SourceListScreen: undefined;
+  MessageListScreen: undefined;
   NewPostScreen: { community?: Community };
   NotificationScreen: undefined;
   ProfileScreen: undefined;
@@ -56,6 +71,8 @@ export type RootStackScreenProps<Screen extends keyof RootStackParamList> =
 export type RootTabParamList = {
   FeedScreen: { sort: SortOption };
   SearchScreen: undefined;
+  SourceListScreen: undefined;
+  MessageListScreen: undefined;
   NewPostScreen: { community?: Community };
   NotificationScreen: undefined;
   ProfileScreen: undefined;

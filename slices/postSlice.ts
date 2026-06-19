@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Store normalized post state in Redux.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Upsert posts from feeds and details
+        - Patch post fields after child loads
+        - Update optimistic post votes
+
+    This file intentionally does NOT contain:
+
+        - network requests
+        - component rendering
 */
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";

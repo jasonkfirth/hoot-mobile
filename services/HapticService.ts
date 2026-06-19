@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Wrap platform haptic feedback calls.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Skip haptics on web
+        - Expose the subset of Expo haptics used by the UI
+
+    This file intentionally does NOT contain:
+
+        - gesture handling
+        - business logic
 */
 
 import { Platform } from "react-native";

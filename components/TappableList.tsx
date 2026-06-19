@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Render a themed list of tappable settings/profile rows.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Display icons, labels, and disabled state
+        - Invoke row actions consistently
+
+    This file intentionally does NOT contain:
+
+        - screen-specific settings logic
+        - data fetching
 */
 
 import React from "react";
@@ -24,6 +30,7 @@ import {
 } from "react-native";
 import Icon from "@expo/vector-icons/Ionicons";
 import useTheme from "../hooks/useTheme";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 export type TappableListProps = {
   items: TappableListItem[];
@@ -102,6 +109,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   item: {
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingLeft: 15,
     display: "flex",
     flexDirection: "row",

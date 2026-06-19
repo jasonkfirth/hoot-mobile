@@ -30,6 +30,10 @@ import { RootStackParamList } from '../types';
 /* Deep Linking Configuration                                                */
 /* ------------------------------------------------------------------------- */
 
+function parseSortOption(sort: string): SortOption {
+  return sort === "hot" || sort === "new" || sort === "top" ? sort : "hot";
+}
+
 const linking: LinkingOptions<RootStackParamList> = {
   prefixes: [Linking.createURL('/')],
   config: {
@@ -39,10 +43,12 @@ const linking: LinkingOptions<RootStackParamList> = {
           FeedScreen: {
             path: 'feed/:sort',
             parse: {
-              sort: (sort: string) => sort as any,
+              sort: parseSortOption,
             },
           },
           SearchScreen: 'search',
+          SourceListScreen: 'sources',
+          MessageListScreen: 'messages',
           NewPostScreen: 'new-post',
           NotificationScreen: 'notifications',
           ProfileScreen: 'profile',
@@ -54,6 +60,25 @@ const linking: LinkingOptions<RootStackParamList> = {
         path: 'community/:id',
         parse: {
           id: (id: string) => Number(id),
+        },
+      },
+      CollectionTarget: {
+        path: 'collection-targets/:id',
+        parse: {
+          id: (id: string) => Number(id),
+        },
+      },
+      CollectionTargetItem: {
+        path: 'collection-targets/:collectionTargetId/items/:itemId',
+        parse: {
+          collectionTargetId: (id: string) => Number(id),
+          itemId: (id: string) => Number(id),
+        },
+      },
+      MessageThread: {
+        path: 'messages/users/:userId',
+        parse: {
+          userId: (userId: string) => Number(userId),
         },
       },
       ProfileActivity: {

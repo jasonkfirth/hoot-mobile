@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Load startup resources before the app renders.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load bundled fonts
+        - Hide the splash screen after resource loading
+        - Expose startup completion state
+
+    This file intentionally does NOT contain:
+
+        - Lotide API loading
+        - navigation setup
 */
 
 import { FontAwesome } from '@expo/vector-icons';
@@ -21,27 +28,26 @@ import * as React from 'react';
 export default function useCachedResources() {
   const [isLoadingComplete, setLoadingComplete] = React.useState(false);
 
-  // Load any resources or data that we need prior to rendering the app
   React.useEffect(() => {
     async function loadResourcesAndDataAsync() {
       try {
-        SplashScreen.preventAutoHideAsync();
+        await SplashScreen.preventAutoHideAsync();
 
-        // Load fonts
         await Font.loadAsync({
           ...FontAwesome.font,
           'space-mono': require('../assets/fonts/SpaceMono-Regular.ttf'),
         });
       } catch (e) {
-        // We might want to provide this error information to an error reporting service
-        console.warn(e);
+        console.warn("Failed to load startup resources", e);
       } finally {
         setLoadingComplete(true);
-        SplashScreen.hideAsync();
+        SplashScreen.hideAsync().catch(e => {
+          console.warn("Failed to hide splash screen", e);
+        });
       }
     }
 
-    loadResourcesAndDataAsync();
+    void loadResourcesAndDataAsync();
   }, []);
 
   return isLoadingComplete;

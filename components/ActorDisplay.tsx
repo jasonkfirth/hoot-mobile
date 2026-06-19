@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Render a Lotide actor name and optional host label.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Format local and remote actor identifiers
+        - Highlight the logged-in user when known
+        - Apply actor color and host visibility rules
+
+    This file intentionally does NOT contain:
+
+        - navigation behavior
+        - profile or community fetching
 */
 
 import React from "react";

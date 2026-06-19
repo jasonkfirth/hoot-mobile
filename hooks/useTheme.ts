@@ -6,11 +6,16 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Return the active Hoot color palette.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Combine color-scheme detection with theme tokens
+
+    This file intentionally does NOT contain:
+
+        - theme token definitions
+        - platform color APIs
 */
 
 import Colors from "../constants/Colors";

@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Provide basic themed React Native primitives.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Apply app theme colors to text, views, and inputs
+        - Keep shared primitive styling centralized
+
+    This file intentionally does NOT contain:
+
+        - screen layout
+        - business logic
 */
 
 /**

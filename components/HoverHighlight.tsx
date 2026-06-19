@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Add hover feedback around pressable content.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Track pointer hover state on supported platforms
+        - Apply highlight styling without changing child behavior
+
+    This file intentionally does NOT contain:
+
+        - navigation logic
+        - gesture handling beyond hover
 */
 
 import React, { PropsWithChildren, useState } from "react";

@@ -25,6 +25,10 @@
 import Icon from "@expo/vector-icons/Ionicons";
 import React from "react";
 import { Pressable, StyleProp, StyleSheet, ViewStyle } from "react-native";
+import {
+  MINIMUM_TOUCH_TARGET_SIZE,
+  TOUCH_TARGET_HIT_SLOP,
+} from "../constants/TouchTargets";
 import useTheme from "../hooks/useTheme";
 import { Text, View } from "./Themed";
 
@@ -64,7 +68,7 @@ export default function RetryState({
       <Pressable
         accessibilityLabel={actionLabel}
         accessibilityRole="button"
-        hitSlop={6}
+        hitSlop={TOUCH_TARGET_HIT_SLOP}
         onPress={onRetry}
         style={({ pressed }) => [
           styles.button,
@@ -98,7 +102,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 8,
     flexDirection: "row",
-    minHeight: 48,
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingHorizontal: 18,
     paddingVertical: 10,
   },

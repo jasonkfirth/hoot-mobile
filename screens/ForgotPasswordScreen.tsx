@@ -6,25 +6,32 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Handle Lotide password reset requests.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Request reset keys by email
+        - Submit reset key and new password
+        - Show recoverable errors
+
+    This file intentionally does NOT contain:
+
+        - login persistence
+        - host selection
 */
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { RootStackScreenProps } from "../types";
 import { Text, TextInput, View } from "../components/Themed";
 import {
   Alert,
-  Button,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
 } from "react-native";
+import AppButton from "../components/AppButton";
 import useTheme from "../hooks/useTheme";
 import * as LotideService from "../services/LotideService";
 import { getErrorMessage } from "../utils/error";
@@ -37,6 +44,7 @@ export default function ForgotPasswordScreen({
   const [email, setEmail] = useState("");
   const [validKey, setValidKey] = useState<string>();
   const [password, setPassword] = useState("");
+  const keyRequestId = useRef(0);
   const theme = useTheme();
 
   function submitEmail() {
@@ -62,15 +70,34 @@ export default function ForgotPasswordScreen({
       { apiUrl: `https://${route.params.node}/api/unstable` },
       validKey,
       password,
-    ).then(() => navigation.popToTop());
+    )
+      .then(() => navigation.popToTop())
+      .catch(error => {
+        Alert.alert("Failed to reset password", getErrorMessage(error));
+      });
   }
 
   function keyChange(key: string) {
+    keyRequestId.current += 1;
+    const requestId = keyRequestId.current;
+    setValidKey(undefined);
+
     if (key.length < 6) return;
+
     LotideService.forgotPasswordTestKey(
       { apiUrl: `https://${route.params.node}/api/unstable` },
       key,
-    ).then(() => setValidKey(key));
+    )
+      .then(() => {
+        if (requestId === keyRequestId.current) {
+          setValidKey(key);
+        }
+      })
+      .catch(() => {
+        if (requestId === keyRequestId.current) {
+          setValidKey(undefined);
+        }
+      });
   }
 
   return (
@@ -95,7 +122,13 @@ export default function ForgotPasswordScreen({
               returnKeyType="go"
               autoCapitalize="none"
             />
-            <Button title="Submit" onPress={submitEmail} color={theme.tint} />
+            <AppButton
+              title="Submit"
+              onPress={submitEmail}
+              color={theme.tint}
+              fullWidth
+              style={styles.singleButton}
+            />
           </>
         ) : (
           <>
@@ -112,15 +145,17 @@ export default function ForgotPasswordScreen({
                   autoComplete="password"
                 />
                 <View style={styles.actionButtons}>
-                  <Button
+                  <AppButton
                     title="Go Back"
                     onPress={() => setIsAwaitingKey(false)}
                     color={theme.secondaryTint}
+                    style={styles.actionButton}
                   />
-                  <Button
+                  <AppButton
                     title="Submit"
                     onPress={submitPassword}
                     color={theme.tint}
+                    style={styles.actionButton}
                   />
                 </View>
               </>
@@ -153,10 +188,20 @@ const styles = StyleSheet.create({
     marginTop: 15,
   },
   actionButtons: {
+    alignItems: "center",
     display: "flex",
     width: "100%",
     flexDirection: "row",
-    justifyContent: "space-around",
+    flexWrap: "wrap",
+    gap: 12,
+    justifyContent: "center",
+    marginTop: 15,
+  },
+  actionButton: {
+    flexGrow: 1,
+  },
+  singleButton: {
+    marginTop: 15,
   },
 });
 

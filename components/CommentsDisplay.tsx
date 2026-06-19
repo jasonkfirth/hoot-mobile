@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Render a threaded comment tree for posts and comments.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load comment children through the comment hooks
+        - Render nested replies with voting and reply actions
+        - Show retry states for failed comment loads
+
+    This file intentionally does NOT contain:
+
+        - post fetching
+        - comment submission forms
 */
 
 import React from "react";
@@ -28,11 +35,21 @@ import useComments from "../hooks/useComments";
 import useComment from "../hooks/useComment";
 import useSelectedComment from "../hooks/useSelectedComment";
 import RetryState from "./RetryState";
+import { RootTabScreenProps } from "../types";
+import {
+  MINIMUM_TOUCH_TARGET_SIZE,
+  TOUCH_TARGET_HIT_SLOP,
+} from "../constants/TouchTargets";
+
+type CommentsNavigation = Pick<
+  RootTabScreenProps<"FeedScreen">["navigation"],
+  "navigate"
+>;
 
 export interface CommentsDisplayProps {
   parentType: ContentType;
   parentId: number;
-  navigation: any;
+  navigation: CommentsNavigation;
   layer?: number;
   postId?: PostId;
   highlightedComments?: CommentId[];
@@ -108,8 +125,14 @@ export default function CommentsDisplay({
           style={styles.retry}
         />
       ) : comments.next_page !== null ? (
-        <Pressable hitSlop={5} onPress={loadNextPage}>
-          <Text style={{ color: theme.tint, paddingTop: 5, paddingBottom: 10 }}>
+        <Pressable
+          accessibilityLabel="Load more comments"
+          accessibilityRole="button"
+          hitSlop={TOUCH_TARGET_HIT_SLOP}
+          onPress={loadNextPage}
+          style={styles.moreComments}
+        >
+          <Text style={{ color: theme.tint }}>
             More comments <Icon name="chevron-down-outline" />
           </Text>
         </Pressable>
@@ -133,7 +156,7 @@ function CommentDisplay({
 }: {
   commentId: CommentId;
   layer: number;
-  navigation: any;
+  navigation: CommentsNavigation;
   layerColors: ColorValue[];
   postId?: PostId;
   highlightedComments?: CommentId[];
@@ -252,6 +275,8 @@ function CommentDisplay({
                 <Icon color={theme.text} size={20} name="bookmark-outline" />
               </Pressable> */}
               <Pressable
+                accessibilityLabel="Reply to comment"
+                accessibilityRole="button"
                 style={styles.button}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -266,6 +291,10 @@ function CommentDisplay({
                 <Icon color={theme.text} size={20} name="arrow-undo-outline" />
               </Pressable>
               <Pressable
+                accessibilityLabel={
+                  showChildren ? "Collapse replies" : "Expand replies"
+                }
+                accessibilityRole="button"
                 style={styles.button}
                 onPress={() => {
                   setShowChildren(s => !s);
@@ -318,8 +347,14 @@ function CommentDisplay({
           style={styles.nestedRetry}
         />
       ) : comments === undefined ? (
-        <Pressable hitSlop={5} onPress={loadNextPage}>
-          <View style={{ paddingHorizontal: 15, paddingBottom: 10 }}>
+        <Pressable
+          accessibilityLabel="Load more replies"
+          accessibilityRole="button"
+          hitSlop={TOUCH_TARGET_HIT_SLOP}
+          onPress={loadNextPage}
+          style={styles.moreComments}
+        >
+          <View style={{ paddingHorizontal: 15 }}>
             <Text style={{ color: theme.tint }}>
               More comments <Icon name="chevron-forward-outline" />
             </Text>
@@ -339,7 +374,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
   },
   button: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+    minWidth: MINIMUM_TOUCH_TARGET_SIZE,
     padding: 10,
+    paddingHorizontal: 15,
+  },
+  moreComments: {
+    justifyContent: "center",
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingHorizontal: 15,
   },
   retry: {

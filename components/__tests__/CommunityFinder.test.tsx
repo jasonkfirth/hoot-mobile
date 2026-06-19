@@ -29,7 +29,7 @@ import configureStoreMock from "redux-mock-store";
 
 import CommunityFinder from "../CommunityFinder";
 
-const mockGetCommunities = jest.fn();
+const mockGetAllCommunities = jest.fn();
 
 jest.mock("../../hooks/useTheme", () => ({
   __esModule: true,
@@ -46,7 +46,7 @@ jest.mock("../../hooks/useTheme", () => ({
 jest.mock("../../services/LotideService", () => ({
   __esModule: true,
   ...jest.requireActual("../../services/LotideService"),
-  getCommunities: (...args: unknown[]) => mockGetCommunities(...args),
+  getAllCommunities: (...args: unknown[]) => mockGetAllCommunities(...args),
 }));
 
 const mockStore = configureStoreMock([]);
@@ -58,23 +58,20 @@ function renderWithStore(ui: React.ReactElement, ctx: LotideContext = {}) {
 describe("CommunityFinder", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetCommunities.mockResolvedValue({
-      items: [
-        {
-          id: 1,
-          name: "lotide",
-          host: "lotide.fbxl.net",
-          local: false,
-        },
-        {
-          id: 2,
-          name: "narwhal",
-          host: "narwhal.city",
-          local: false,
-        },
-      ],
-      next_page: null,
-    });
+    mockGetAllCommunities.mockResolvedValue([
+      {
+        id: 1,
+        name: "lotide",
+        host: "lotide.fbxl.net",
+        local: false,
+      },
+      {
+        id: 2,
+        name: "narwhal",
+        host: "narwhal.city",
+        local: false,
+      },
+    ]);
   });
 
   test("renders communities and calls onSelect when a row is tapped", async () => {
@@ -85,7 +82,7 @@ describe("CommunityFinder", () => {
     );
 
     await waitFor(() => {
-      expect(mockGetCommunities).toHaveBeenCalledTimes(1);
+      expect(mockGetAllCommunities).toHaveBeenCalledTimes(1);
       expect(screen.getByText("lotide")).toBeTruthy();
       expect(screen.getByText("narwhal")).toBeTruthy();
     });
@@ -110,7 +107,7 @@ describe("CommunityFinder", () => {
     );
 
     await waitFor(() => {
-      expect(mockGetCommunities).toHaveBeenCalledWith(
+      expect(mockGetAllCommunities).toHaveBeenCalledWith(
         expect.objectContaining({
           login: { token: "token-1" },
         }),
@@ -144,7 +141,7 @@ describe("CommunityFinder", () => {
     );
 
     await waitFor(() => {
-      expect(mockGetCommunities).toHaveBeenCalledTimes(1);
+      expect(mockGetAllCommunities).toHaveBeenCalledTimes(1);
     });
     expect(screen.queryByText("lotide")).toBeNull();
 
@@ -157,14 +154,14 @@ describe("CommunityFinder", () => {
   });
 
   test("does not crash or expose stale rows when community loading fails", async () => {
-    mockGetCommunities.mockRejectedValue(new Error("server unavailable"));
+    mockGetAllCommunities.mockRejectedValue(new Error("server unavailable"));
 
     const screen = await renderWithStore(<CommunityFinder onSelect={() => {}} />, {
       login: { token: "token-1" },
     });
 
     await waitFor(() => {
-      expect(mockGetCommunities).toHaveBeenCalledTimes(1);
+      expect(mockGetAllCommunities).toHaveBeenCalledTimes(1);
     });
     expect(screen.getByPlaceholderText("Filter communities")).toBeTruthy();
     expect(screen.queryByText("lotide")).toBeNull();

@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Render a post link preview and open action.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load URL metadata through the href hook
+        - Show link title and domain details
+        - Open external links through the platform browser
+
+    This file intentionally does NOT contain:
+
+        - HTML content rendering
+        - Lotide post fetching
 */
 
 import React, { useState } from "react";
@@ -21,6 +28,7 @@ import * as Haptics from "../services/HapticService";
 import { openURL } from "expo-linking";
 import useTheme from "../hooks/useTheme";
 import useHrefData from "../hooks/useHrefData";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 export default function HrefDisplay({ href }: { href: string }) {
   const [imgAspect, setImgAspect] = useState(1);
@@ -63,7 +71,11 @@ export default function HrefDisplay({ href }: { href: string }) {
           }}
         >
           {hrefData.isVideo && (
-            <Pressable onPress={openLink}>
+            <Pressable
+              accessibilityLabel="Open video link"
+              accessibilityRole="button"
+              onPress={openLink}
+            >
               <Icon
                 name="play-outline"
                 size={70}
@@ -76,6 +88,8 @@ export default function HrefDisplay({ href }: { href: string }) {
       )}
       {!!hrefData.linkUrl && (
         <Pressable
+          accessibilityLabel={`Open link ${href}`}
+          accessibilityRole="link"
           style={[
             styles.link,
             !!hrefData.imageUrl && styles.wideLink,
@@ -92,6 +106,8 @@ export default function HrefDisplay({ href }: { href: string }) {
 
 const styles = StyleSheet.create({
   link: {
+    justifyContent: "center",
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingVertical: 10,
     paddingHorizontal: 15,
     borderRadius: 5,

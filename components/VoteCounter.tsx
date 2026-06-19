@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Render and update post or comment vote state.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Display score and vote state
+        - Apply or remove votes through the vote hook
+        - Show disabled state for anonymous users
+
+    This file intentionally does NOT contain:
+
+        - post/comment fetching
+        - feed pagination
 */
 
 import { Ionicons as Icon } from "@expo/vector-icons";
@@ -19,6 +26,7 @@ import {
   Alert,
   Platform,
   Pressable,
+  StyleProp,
   StyleSheet,
   ViewStyle,
 } from "react-native";
@@ -27,12 +35,16 @@ import useTheme from "../hooks/useTheme";
 import * as Haptics from "../services/HapticService";
 import useVote from "../hooks/useVote";
 import { useLotideCtx } from "../hooks/useLotideCtx";
+import {
+  MINIMUM_TOUCH_TARGET_SIZE,
+  TOUCH_TARGET_HIT_SLOP,
+} from "../constants/TouchTargets";
 
 export interface VoteCounterProps {
   content: Post | Comment;
   type: ContentType;
   hideCount?: boolean;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   onVote?: (isUpvote: boolean) => void;
 }
 
@@ -63,11 +75,13 @@ export default function VoteCounter(props: VoteCounterProps) {
 
   return (
     <Pressable
+      accessibilityLabel={isUpvoted ? "Remove like" : "Like"}
+      accessibilityRole="button"
       onPress={() => toggleVote()}
-      hitSlop={7}
-      style={[styles.root, props.style]}
+      hitSlop={TOUCH_TARGET_HIT_SLOP}
+      style={[styles.touchTarget, props.style]}
     >
-      <View style={styles.root}>
+      <View style={styles.content}>
         <Icon
           name={isUpvoted ? "heart" : "heart-outline"}
           color={scoreColor}
@@ -84,11 +98,19 @@ export default function VoteCounter(props: VoteCounterProps) {
 }
 
 const styles = StyleSheet.create({
-  root: {
+  touchTarget: {
+    alignItems: "center",
     display: "flex",
     flexDirection: "row",
-    alignItems: "center",
+    justifyContent: "center",
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+    minWidth: MINIMUM_TOUCH_TARGET_SIZE,
     ...(Platform.OS === "web" ? { cursor: "pointer" } : {}),
+  },
+  content: {
+    alignItems: "center",
+    display: "flex",
+    flexDirection: "row",
   },
   score: {
     fontSize: 18,

@@ -37,8 +37,9 @@ import { Provider, useDispatch } from "react-redux";
 import { setCtx } from "./slices/lotideSlice";
 import reduxStore from "./store/reduxStore";
 import { useLotideCtx } from "./hooks/useLotideCtx";
-import { Alert, Platform } from "react-native";
+import { Alert, AppState, Platform } from "react-native";
 import { getErrorMessage } from "./utils/error";
+import { MINIMUM_LOTIDE_API_VERSION } from "./constants/LotideApi";
 
 /* ------------------------------------------------------------------------- */
 /* Main Application Component                                                */
@@ -65,15 +66,41 @@ function App() {
 
   useEffect(() => {
     if (Platform.OS === "android") {
-      LotideNotificationPoller.registerNotificationPollTask().catch(() => {
-        console.error("Failed to register background notification task");
+      LotideNotificationPoller.registerNotificationPollTask().catch(error => {
+        console.warn(
+          "Failed to register background notification task",
+          getErrorMessage(error),
+        );
       });
     }
-
   }, []);
 
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    if (!ctx?.login) return;
+
+    const pollCurrentContext = () => {
+      LotideNotificationPoller.pollNotificationsNow(ctx).catch(error => {
+        console.warn(
+          "Failed to poll Lotide notifications",
+          getErrorMessage(error),
+        );
+      });
+    };
+
+    pollCurrentContext();
+
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "active") {
+        pollCurrentContext();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [ctx]);
+
   /* ------------------------------------------------------------------------- */
-  /* API Synchronization                                                       */
+  /* Stored Context Loading                                                    */
   /* ------------------------------------------------------------------------- */
 
   useEffect(() => {
@@ -90,29 +117,76 @@ function App() {
 
   useEffect(() => {
     if (!ctx?.apiUrl) return;
+
+    let isActive = true;
+
+    const applyContextSafely = (nextCtx: LotideContext) => {
+      applyNewContext(nextCtx).catch(error => {
+        console.warn("Failed to persist Lotide context", getErrorMessage(error));
+      });
+    };
+
+    const expireLogin = () => {
+      StorageService.lotideContextKV
+        .logout(ctx)
+        .then(() => {
+          if (!isActive) return;
+
+          applyContextSafely({
+            apiUrl: ctx.apiUrl,
+            apiVersion: ctx.apiVersion,
+          });
+        })
+        .catch(error => {
+          console.warn("Failed to expire stored Lotide login", getErrorMessage(error));
+        });
+    };
+
     LotideService.getInstanceInfo(ctx)
       .then(data => {
-        console.log(ctx);
-        console.log("version", data.apiVersion);
-        if (data.apiVersion < 8) throw "Bad version";
+        if (!isActive) return;
+
+        if (data.apiVersion < MINIMUM_LOTIDE_API_VERSION) {
+          Alert.alert(
+            "Server not supported",
+            "The selected Lotide server is too old for this version of Hoot.",
+          );
+          applyContextSafely({});
+          return;
+        }
+
         if (data.apiVersion === ctx.apiVersion) return;
-        applyNewContext({
+        applyContextSafely({
           ...ctx,
           apiVersion: data.apiVersion,
         });
       })
       .catch(e => {
-        Alert.alert("Failed to login", getErrorMessage(e));
-        StorageService.lotideContextKV
-          .remove(`${ctx.login?.user?.username}@${ctx.apiUrl}`)
-          .then(() => applyNewContext({}));
+        if (!isActive) return;
+
+        Alert.alert("Cannot refresh server info", getErrorMessage(e));
       });
-    if (!ctx.login?.user) return;
-    LotideService.getUserData(ctx, ctx.login.user.id).catch(() => {
-      StorageService.lotideContextKV
-        .remove(`${ctx.login?.user?.username}@${ctx.apiUrl}`)
-        .then(() => applyNewContext({}));
-    });
+
+    if (ctx.login?.user) {
+      LotideService.getUserData(ctx, ctx.login.user.id).catch(e => {
+        if (!isActive) return;
+
+        if (LotideService.isAuthenticationError(e)) {
+          Alert.alert(
+            "Session expired",
+            "Please sign in again to continue using this Lotide account.",
+          );
+          expireLogin();
+          return;
+        }
+
+        console.warn("Failed to refresh Lotide profile", getErrorMessage(e));
+      });
+    }
+
+    return () => {
+      isActive = false;
+    };
   }, [applyNewContext, ctx]);
 
   /* ------------------------------------------------------------------------- */

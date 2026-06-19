@@ -26,11 +26,11 @@ import {
   StyleSheet,
   TextInput,
   Alert,
-  Button,
   ScrollView,
   Platform,
   Switch,
 } from "react-native";
+import AppButton from "../../components/AppButton";
 import { View, Text } from "../../components/Themed";
 import useTheme from "../../hooks/useTheme";
 import { useLotideCtx } from "../../hooks/useLotideCtx";
@@ -38,6 +38,7 @@ import { useDispatch } from "react-redux";
 import { setCtx } from "../../slices/lotideSlice";
 import * as StorageService from "../../services/StorageService";
 import * as LotideNotificationPoller from "../../services/LotideNotificationPoller";
+import { getErrorMessage } from "../../utils/error";
 
 /* ------------------------------------------------------------------------- */
 /* Settings Screen Component                                                 */
@@ -85,20 +86,19 @@ export default function SettingsScreen() {
     setUpdatingNotificationSetting(true);
 
     try {
-      let next = nextValue;
-      if (nextValue) {
-        const granted = await LotideNotificationPoller.requestNotificationPermission();
-        if (!granted) {
-          Alert.alert(
-            "Cannot enable notifications",
-            "Allow notifications in system settings to enable Lotide background alerts.",
-          );
-          next = false;
-        }
-      }
-
-      await LotideNotificationPoller.setNotificationEnabled(next, ctx ?? undefined);
-      setNotificationEnabledState(next);
+      await LotideNotificationPoller.setNotificationEnabled(
+        nextValue,
+        ctx ?? undefined,
+      );
+      setNotificationEnabledState(nextValue);
+    } catch (error) {
+      const current =
+        await LotideNotificationPoller.getNotificationEnabled();
+      setNotificationEnabledState(current);
+      Alert.alert(
+        nextValue ? "Cannot enable notifications" : "Cannot update notifications",
+        getErrorMessage(error),
+      );
     } finally {
       setUpdatingNotificationSetting(false);
     }
@@ -163,7 +163,12 @@ export default function SettingsScreen() {
       ) : null}
 
       <View style={styles.buttonContainer}>
-        <Button title="Save Changes" onPress={handleSave} color={theme.tint} />
+        <AppButton
+          title="Save Changes"
+          onPress={handleSave}
+          color={theme.tint}
+          fullWidth
+        />
       </View>
     </ScrollView>
   );
@@ -215,7 +220,7 @@ const styles = StyleSheet.create({
     marginTop: 40,
     paddingHorizontal: 20,
     paddingBottom: 40,
-  }
+  },
 });
 
 /* end of SettingsScreen.tsx */

@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Render known and stored Lotide hosts for login.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Probe seeded hosts for instance metadata
+        - List stored account profiles
+        - Select custom or known host domains
+
+    This file intentionally does NOT contain:
+
+        - login form fields
+        - network discovery beyond the seeded list
 */
 
 import React, { useCallback, useEffect, useState } from "react";
@@ -26,6 +33,8 @@ import { setCtx } from "../slices/lotideSlice";
 import { useDispatch } from "react-redux";
 import ContentDisplay from "./ContentDisplay";
 import RetryState from "./RetryState";
+import { MINIMUM_LOTIDE_API_VERSION } from "../constants/LotideApi";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 export interface HostListProps {
   onSelect: (domain: string, name?: string, username?: string) => void;
@@ -90,7 +99,8 @@ export default function HostList(props: HostListProps) {
   }, []);
 
   const renderItem = ({ item, index }: { item: HostData; index: number }) => {
-    const enabled = (item.instanceInfo?.apiVersion || 0) > 8;
+    const enabled =
+      (item.instanceInfo?.apiVersion || 0) >= MINIMUM_LOTIDE_API_VERSION;
     const color = enabled ? theme.text : theme.secondaryText;
     const description = item.instanceInfo?.description;
     return (
@@ -185,6 +195,7 @@ export default function HostList(props: HostListProps) {
               display: "flex",
               flexDirection: "row",
               alignItems: "center",
+              minHeight: MINIMUM_TOUCH_TARGET_SIZE,
             }}
           >
             <Icon
@@ -222,7 +233,7 @@ export default function HostList(props: HostListProps) {
       </Text>
       <TextInput
         placeholder="Host domain"
-        style={{ paddingVertical: 10, paddingHorizontal: 10 }}
+        style={styles.hostInput}
         value={hostText}
         onChangeText={setHostText}
         onSubmitEditing={() => props.onSelect(hostText.toLowerCase())}
@@ -260,6 +271,11 @@ const styles = StyleSheet.create({
   },
   hostRetry: {
     marginTop: 10,
+  },
+  hostInput: {
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
   },
 });
 

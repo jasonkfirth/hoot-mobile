@@ -6,17 +6,23 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Collect Lotide login credentials for a selected host.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Submit username and password to the Lotide login API
+        - Persist successful login context
+        - Offer registration and password reset navigation
+
+    This file intentionally does NOT contain:
+
+        - host selection
+        - global app bootstrapping
 */
 
 import React, { useRef, useState } from "react";
 import {
   Alert,
-  Button,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -24,6 +30,7 @@ import {
   StyleSheet,
   TextInput as DefaultTextInput,
 } from "react-native";
+import AppButton from "./AppButton";
 import { Text, TextInput, View } from "./Themed";
 import * as LotideService from "../services/LotideService";
 import useTheme from "../hooks/useTheme";
@@ -32,6 +39,7 @@ import { useDispatch } from "react-redux";
 import { setCtx } from "../slices/lotideSlice";
 import { getErrorMessage } from "../utils/error";
 import { RootStackScreenProps } from "../types";
+import { TOUCH_TARGET_HIT_SLOP } from "../constants/TouchTargets";
 
 export interface LoginProps {
   hostName?: string;
@@ -76,7 +84,6 @@ export default function Login(props: LoginProps) {
       })
       .catch(e => {
         Alert.alert("Failed to register", getErrorMessage(e));
-        console.error(e);
       });
   }
 
@@ -99,7 +106,6 @@ export default function Login(props: LoginProps) {
       })
       .catch(e => {
         Alert.alert("Failed to login", getErrorMessage(e));
-        console.error(e);
       });
   }
 
@@ -129,7 +135,14 @@ export default function Login(props: LoginProps) {
             <Text style={{ fontSize: 24 }}>{props.domain}</Text>
           </Pressable>
         )}
-        <Pressable hitSlop={5} onPress={() => setIsRegistering(x => !x)}>
+        <Pressable
+          accessibilityLabel={
+            isRegistering ? "Switch to login" : "Switch to registration"
+          }
+          accessibilityRole="button"
+          hitSlop={TOUCH_TARGET_HIT_SLOP}
+          onPress={() => setIsRegistering(x => !x)}
+        >
           <Text style={[styles.loginRegister, { color: theme.secondaryText }]}>
             <Text
               style={{
@@ -192,6 +205,7 @@ export default function Login(props: LoginProps) {
         {!isRegistering && (
           <Pressable
             style={{ padding: 15 }}
+            accessibilityRole="button"
             onPress={() =>
               navigation.navigate("ForgotPassword", {
                 node: props.domain,
@@ -202,15 +216,17 @@ export default function Login(props: LoginProps) {
           </Pressable>
         )}
         <View style={styles.actionButtons}>
-          <Button
+          <AppButton
             title="Change Host"
             onPress={props.onGoBack}
             color={theme.secondaryTint}
+            style={styles.actionButton}
           />
-          <Button
+          <AppButton
             title={isRegistering ? "Register" : "Login"}
             onPress={submit}
             color={theme.tint}
+            style={styles.actionButton}
           />
         </View>
       </KeyboardAvoidingView>
@@ -243,9 +259,15 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     width: "100%",
+    alignItems: "center",
     display: "flex",
     flexDirection: "row",
-    justifyContent: "space-around",
+    flexWrap: "wrap",
+    gap: 12,
+    justifyContent: "center",
+  },
+  actionButton: {
+    flexGrow: 1,
   },
 });
 

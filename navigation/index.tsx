@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Define the app navigation tree and tab/drawer actions.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Configure root, tab, drawer, and stack navigators
+        - Wire feed sorting controls
+        - Register profile, moderation, and settings screens
+
+    This file intentionally does NOT contain:
+
+        - deep link path mapping
+        - screen implementations
 */
 
 /**
@@ -18,19 +25,21 @@
  * https://reactnavigation.org/docs/getting-started
  *
  */
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "@expo/vector-icons/Ionicons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
   DefaultTheme,
   DarkTheme,
   NavigationContainer,
+  useNavigationContainerRef,
 } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import {
   ActionSheetIOS,
   Platform,
   Pressable,
+  StyleSheet,
   useWindowDimensions,
 } from "react-native";
 
@@ -38,6 +47,7 @@ import Colors from "../constants/Colors";
 import useColorScheme, { AppColorScheme } from "../hooks/useColorScheme";
 import {
   RootStackParamList,
+  RootStackScreenProps,
   RootTabParamList,
 } from "../types";
 import LinkingConfiguration from "./LinkingConfiguration";
@@ -57,14 +67,48 @@ import ForgotPasswordScreen from "../screens/ForgotPasswordScreen";
 import EditCommunityScreen from "../screens/EditCommunityScreen";
 import ProfileActivityScreen from "../screens/ProfileActivityScreen";
 import ModerationScreen from "../screens/ModerationScreen";
+import SourceListScreen from "../screens/SourceListScreen";
+import SourceScreen from "../screens/SourceScreen";
+import SourceItemScreen from "../screens/SourceItemScreen";
+import MessageListScreen from "../screens/MessageListScreen";
+import MessageThreadScreen from "../screens/MessageThreadScreen";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import { createDrawerNavigator } from "@react-navigation/drawer";
+import * as LotideNotificationPoller from "../services/LotideNotificationPoller";
+import {
+  supportsCollectionTargets,
+  supportsPrivateMessages,
+} from "../constants/LotideApi";
+import {
+  MINIMUM_TOUCH_TARGET_SIZE,
+  TOUCH_TARGET_HIT_SLOP,
+} from "../constants/TouchTargets";
+
+type RootNavigation = RootStackScreenProps<"Root">["navigation"];
+type SortIconName = React.ComponentProps<typeof Icon>["name"];
+
+const bottomTabSortIcons: Record<SortOption, SortIconName> = {
+  hot: "flame-outline",
+  new: "time-outline",
+  top: "trophy-outline",
+};
+
+const drawerSortIcons: Record<SortOption, SortIconName> = {
+  hot: "flame-outline",
+  new: "time-outline",
+  top: "arrow-up-outline",
+};
 
 export default function Navigation({
   colorScheme,
 }: {
   colorScheme: AppColorScheme;
 }) {
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const pendingNotificationTarget =
+    useRef<LotideNotificationPoller.NotificationNavigationTarget | undefined>(
+      undefined,
+    );
   const navigationTheme = {
     ...(colorScheme === "dark" ? DarkTheme : DefaultTheme),
     colors: {
@@ -78,9 +122,57 @@ export default function Navigation({
     },
   };
 
+  const navigateToNotificationTarget = useCallback(
+    (target: LotideNotificationPoller.NotificationNavigationTarget) => {
+      if (!navigationRef.isReady()) {
+        pendingNotificationTarget.current = target;
+        return;
+      }
+
+      switch (target.screen) {
+        case "Post":
+          navigationRef.navigate("Post", target.params);
+          break;
+        case "Notifications":
+          navigationRef.navigate("Root", { screen: "NotificationScreen" });
+          break;
+        case "MessageThread":
+          navigationRef.navigate("MessageThread", target.params);
+          break;
+      }
+
+      pendingNotificationTarget.current = undefined;
+      LotideNotificationPoller.clearLastNotificationResponse();
+    },
+    [navigationRef],
+  );
+
+  const flushPendingNotificationTarget = useCallback(() => {
+    const target =
+      pendingNotificationTarget.current ??
+      LotideNotificationPoller.getLastNotificationNavigationTarget();
+
+    if (target) {
+      navigateToNotificationTarget(target);
+    }
+  }, [navigateToNotificationTarget]);
+
+  useEffect(() => {
+    flushPendingNotificationTarget();
+
+    const subscription =
+      LotideNotificationPoller.addNotificationResponseReceivedListener(
+        navigateToNotificationTarget,
+      );
+
+    return () => subscription.remove();
+  }, [flushPendingNotificationTarget, navigateToNotificationTarget]);
+
   return (
     <NavigationContainer
+      ref={navigationRef}
       linking={LinkingConfiguration}
+      onReady={flushPendingNotificationTarget}
       theme={navigationTheme}
     >
       <RootNavigator />
@@ -108,6 +200,27 @@ function RootNavigator() {
       <Stack.Screen name="Post" component={ModalScreen} />
       <Stack.Screen name="Comment" component={CommentScreen} />
       <Stack.Screen name="Community" component={CommunityScreen} />
+      <Stack.Screen
+        name="CollectionTarget"
+        component={SourceScreen}
+        options={{ title: "Feed" }}
+      />
+      <Stack.Screen
+        name="CollectionTargetItem"
+        component={SourceItemScreen}
+        options={({ route }) => ({
+          title: route.params?.title || "Feed Item",
+        })}
+      />
+      <Stack.Screen
+        name="MessageThread"
+        component={MessageThreadScreen}
+        options={({ route }) => ({
+          title: route.params?.username
+            ? `Messages with ${route.params.username}`
+            : "Messages",
+        })}
+      />
       <Stack.Screen name="NewCommunity" component={NewCommunityScreen} />
       <Stack.Screen name="EditCommunity" component={EditCommunityScreen} />
       <Stack.Screen
@@ -148,11 +261,13 @@ function RootNavigator() {
  */
 const BottomTab = createBottomTabNavigator<RootTabParamList>();
 
-function BottomTabNavigator({ navigation }: any) {
+function BottomTabNavigator({ navigation }: { navigation: RootNavigation }) {
   const [sort, setSort] = useState<SortOption>("hot");
   const ctx = useLotideCtx();
   const colorScheme = useColorScheme();
   const supportsTop = (ctx?.apiVersion || 0) >= 10;
+  const supportsSources = supportsCollectionTargets(ctx?.apiVersion);
+  const supportsMessages = supportsPrivateMessages(ctx?.apiVersion);
   const safeSort: SortOption = supportsTop ? sort : "hot";
 
   const sortMenu = [
@@ -182,16 +297,19 @@ function BottomTabNavigator({ navigation }: any) {
         name="FeedScreen"
         component={FeedScreen}
         initialParams={{ sort: safeSort }}
-          options={({ navigation }) => ({
-            title: "Hoot",
-            tabBarIcon: ({ color }) => (
-              <TabBarIcon name="newspaper-outline" color={color} />
-            ),
-            headerRight: () => (
+        options={() => ({
+          title: "Hoot",
+          tabBarIcon: ({ color }) => (
+            <TabBarIcon name="newspaper-outline" color={color} />
+          ),
+          headerRight: () => (
             <Pressable
-                onPress={() => {
-                  if (Platform.OS === "ios") {
-                    ActionSheetIOS.showActionSheetWithOptions(
+              accessibilityLabel="Change feed sort"
+              accessibilityRole="button"
+              hitSlop={TOUCH_TARGET_HIT_SLOP}
+              onPress={() => {
+                if (Platform.OS === "ios") {
+                  ActionSheetIOS.showActionSheetWithOptions(
                     {
                       options: [
                         "Cancel",
@@ -208,7 +326,7 @@ function BottomTabNavigator({ navigation }: any) {
                     },
                   );
                 } else {
-                  const sortSwitch: { [key: string]: SortOption } = {
+                  const sortSwitch: Partial<Record<SortOption, SortOption>> = {
                     hot: "new",
                     new: supportsTop ? "top" : "hot",
                   };
@@ -218,23 +336,17 @@ function BottomTabNavigator({ navigation }: any) {
                   }
                 }
               }}
-              style={({ pressed }) => ({
-                opacity: pressed ? 0.5 : 1,
-              })}
+              style={({ pressed }) => [
+                styles.headerIconButton,
+                { opacity: pressed ? 0.5 : 1 },
+              ]}
             >
               <Icon
-                name={
-                  {
-                    hot: "flame-outline",
-                    new: "time-outline",
-                    top: "trophy-outline",
-                  }[safeSort] as any
-                }
+                name={bottomTabSortIcons[safeSort]}
                 size={25}
                 color={Colors[colorScheme].tint}
-                style={{ marginRight: 15 }}
               />
-          </Pressable>
+            </Pressable>
           ),
         })}
       />
@@ -248,6 +360,18 @@ function BottomTabNavigator({ navigation }: any) {
           ),
         }}
       />
+      {supportsSources && (
+        <BottomTab.Screen
+          name="SourceListScreen"
+          component={SourceListScreen}
+          options={{
+            title: "Feeds",
+            tabBarIcon: ({ color }) => (
+              <TabBarIcon name="radio-outline" color={color} />
+            ),
+          }}
+        />
+      )}
       <BottomTab.Screen
         name="NewPostScreen"
         component={NewPostScreen}
@@ -269,6 +393,18 @@ function BottomTabNavigator({ navigation }: any) {
           ),
         }}
       />
+      {supportsMessages && (
+        <BottomTab.Screen
+          name="MessageListScreen"
+          component={MessageListScreen}
+          options={{
+            title: "Messages",
+            tabBarIcon: ({ color }) => (
+              <TabBarIcon name="mail-outline" color={color} />
+            ),
+          }}
+        />
+      )}
       <BottomTab.Screen
         name="ProfileScreen"
         component={ProfileScreen}
@@ -285,10 +421,12 @@ function BottomTabNavigator({ navigation }: any) {
 
 const Drawer = createDrawerNavigator<RootTabParamList>();
 
-function DrawerNavigator({ navigation }: any) {
+function DrawerNavigator({ navigation }: { navigation: RootNavigation }) {
   const [sort, setSort] = useState<SortOption>("hot");
   const ctx = useLotideCtx();
   const colorScheme = useColorScheme();
+  const supportsSources = supportsCollectionTargets(ctx?.apiVersion);
+  const supportsMessages = supportsPrivateMessages(ctx?.apiVersion);
 
   return (
     <Drawer.Navigator
@@ -310,8 +448,11 @@ function DrawerNavigator({ navigation }: any) {
           ),
           headerRight: () => (
             <Pressable
+              accessibilityLabel="Change feed sort"
+              accessibilityRole="button"
+              hitSlop={TOUCH_TARGET_HIT_SLOP}
               onPress={() => {
-                const sortSwitch: { [key: string]: SortOption } = {
+                const sortSwitch: Record<SortOption, SortOption> = {
                   top: "hot",
                   hot: "new",
                   new: (ctx?.apiVersion || 0) < 10 ? "hot" : "top",
@@ -320,21 +461,15 @@ function DrawerNavigator({ navigation }: any) {
                 setSort(newSort);
                 navigation.navigate("FeedScreen", { sort: newSort });
               }}
-              style={({ pressed }) => ({
-                opacity: pressed ? 0.5 : 1,
-              })}
+              style={({ pressed }) => [
+                styles.headerIconButton,
+                { opacity: pressed ? 0.5 : 1 },
+              ]}
             >
               <Icon
-                name={
-                  {
-                    hot: "flame-outline",
-                    new: "time-outline",
-                    top: "arrow-up-outline",
-                  }[sort] as any
-                }
+                name={drawerSortIcons[sort]}
                 size={25}
                 color={Colors[colorScheme].tint}
-                style={{ marginRight: 15 }}
               />
             </Pressable>
           ),
@@ -350,6 +485,18 @@ function DrawerNavigator({ navigation }: any) {
           ),
         }}
       />
+      {supportsSources && (
+        <Drawer.Screen
+          name="SourceListScreen"
+          component={SourceListScreen}
+          options={{
+            title: "Feeds",
+            drawerIcon: ({ color }) => (
+              <TabBarIcon name="radio-outline" color={color} />
+            ),
+          }}
+        />
+      )}
       <Drawer.Screen
         name="NewPostScreen"
         component={NewPostScreen}
@@ -371,6 +518,18 @@ function DrawerNavigator({ navigation }: any) {
           ),
         }}
       />
+      {supportsMessages && (
+        <Drawer.Screen
+          name="MessageListScreen"
+          component={MessageListScreen}
+          options={{
+            title: "Messages",
+            drawerIcon: ({ color }) => (
+              <TabBarIcon name="mail-outline" color={color} />
+            ),
+          }}
+        />
+      )}
       <Drawer.Screen
         name="ProfileScreen"
         component={ProfileScreen}
@@ -381,18 +540,21 @@ function DrawerNavigator({ navigation }: any) {
           ),
           headerRight: () => (
             <Pressable
+              accessibilityLabel="Open app settings"
+              accessibilityRole="button"
+              hitSlop={TOUCH_TARGET_HIT_SLOP}
               onPress={() => {
                 navigation.navigate("Settings");
               }}
-              style={({ pressed }) => ({
-                opacity: pressed ? 0.5 : 1,
-              })}
+              style={({ pressed }) => [
+                styles.headerIconButton,
+                { opacity: pressed ? 0.5 : 1 },
+              ]}
             >
               <Icon
                 name="settings-outline"
                 size={25}
                 color={Colors[colorScheme].secondaryText}
-                style={{ marginRight: 15 }}
               />
             </Pressable>
           ),
@@ -423,5 +585,15 @@ function TabBarIcon(props: {
     />
   );
 }
+
+const styles = StyleSheet.create({
+  headerIconButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+    minWidth: MINIMUM_TOUCH_TARGET_SIZE,
+  },
+});
 
 /* end of index.tsx */

@@ -6,23 +6,30 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Edit the current community description.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Choose editable markdown/text from server content
+        - Submit description updates
+        - Return to refreshed community details
+
+    This file intentionally does NOT contain:
+
+        - community creation
+        - moderation actions
 */
 
 import React, { useState } from "react";
 import {
   Alert,
-  Button,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
 } from "react-native";
+import AppButton from "../components/AppButton";
 import { TextInput } from "../components/Themed";
 import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
@@ -77,7 +84,7 @@ export default function EditCommunityScreen({
           value={description}
           onChangeText={setDescription}
         />
-        <Button title="Submit" color={theme.tint} onPress={submit} />
+        <AppButton title="Submit" color={theme.tint} onPress={submit} fullWidth />
       </Pressable>
     </KeyboardAvoidingView>
   );

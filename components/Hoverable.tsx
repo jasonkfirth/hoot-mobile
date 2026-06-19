@@ -6,16 +6,38 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Expose a small render-prop wrapper for hover state.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Normalize web hover events for child components
+        - Clone child elements with pointer event handlers
+
+    This file intentionally does NOT contain:
+
+        - business logic
+        - native gesture recognition
 */
 
-import React, { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
-import { canUseDOM } from "fbjs/lib/ExecutionEnvironment";
+
+type BrowserDocument = {
+  addEventListener?: (
+    type: string,
+    listener: () => void,
+    useCapture?: boolean,
+  ) => void;
+  createElement?: unknown;
+};
+
+const browserDocument = (globalThis as { document?: BrowserDocument }).document;
+const addDocumentEventListener = browserDocument?.addEventListener?.bind(
+  browserDocument,
+);
+const canUseDOM =
+  typeof browserDocument?.createElement === "function" &&
+  typeof addDocumentEventListener === "function";
 
 let isEnabled = false;
 
@@ -45,9 +67,9 @@ if (canUseDOM) {
     }
   }
 
-  document.addEventListener("touchstart", disableHover, true);
-  document.addEventListener("touchmove", disableHover, true);
-  document.addEventListener("mousemove", enableHover, true);
+  addDocumentEventListener("touchstart", disableHover, true);
+  addDocumentEventListener("touchmove", disableHover, true);
+  addDocumentEventListener("mousemove", enableHover, true);
 }
 
 function isHoverEnabled(): boolean {
@@ -59,8 +81,17 @@ export interface HoverableProps {
   onHoverOut?: () => void;
   onPressIn?: () => void;
   onPressOut?: () => void;
-  children: ReactNode;
+  children: React.ReactElement<HoverableChildProps>;
 }
+
+type HoverableChildProps = {
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  onResponderGrant?: () => void;
+  onResponderRelease?: () => void;
+  onPressIn?: () => void;
+  onPressOut?: () => void;
+};
 
 export default function Hoverable({
   onHoverIn,
@@ -114,7 +145,7 @@ export default function Hoverable({
     pressOut.current?.();
   }, []);
 
-  let webProps = {};
+  let webProps: Partial<HoverableChildProps> = {};
   if (Platform.OS === "web") {
     webProps = {
       onMouseEnter: handleMouseEnter,
@@ -125,7 +156,7 @@ export default function Hoverable({
     };
   }
 
-  return React.cloneElement(React.Children.only(children) as any, {
+  return React.cloneElement(React.Children.only(children), {
     ...webProps,
     // if child is Touchable
     onPressIn: handleGrant,

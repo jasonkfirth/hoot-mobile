@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Wrap content with left and right swipe actions.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Track drag distance and release thresholds
+        - Invoke configured swipe callbacks
+        - Render action background colors
+
+    This file intentionally does NOT contain:
+
+        - vote semantics
+        - screen navigation rules
 */
 
 import React, {

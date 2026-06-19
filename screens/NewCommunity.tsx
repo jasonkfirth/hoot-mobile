@@ -6,21 +6,30 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Create a new Lotide community.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Submit the community name
+        - Load the created community
+        - Navigate to the new community screen
+
+    This file intentionally does NOT contain:
+
+        - community editing
+        - moderation
 */
 
 import React, { useState } from "react";
-import { Alert, Button, StyleSheet, TextInput } from "react-native";
+import { Alert, StyleSheet, TextInput } from "react-native";
+import AppButton from "../components/AppButton";
 import { Text, View } from "../components/Themed";
 import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
 import * as LotideService from "../services/LotideService";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import { getErrorMessage } from "../utils/error";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 export default function NewCommunityScreen({
   navigation,
@@ -65,11 +74,12 @@ export default function NewCommunityScreen({
             value={description}
             onChangeText={setDescription}
           />
-          <Button
+          <AppButton
             title="Submit"
             color={theme.tint}
             onPress={submit}
             accessibilityLabel="Create new community"
+            fullWidth
           />
         </>
       ) : (
@@ -100,6 +110,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   input: {
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingVertical: 10,
     width: "100%",
     borderRadius: 8,

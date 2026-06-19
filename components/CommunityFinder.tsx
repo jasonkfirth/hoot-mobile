@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Search and page through Lotide communities for selection flows.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load followed or global community lists
+        - Filter communities from typed input
+        - Return selected communities to the caller
+
+    This file intentionally does NOT contain:
+
+        - community detail rendering
+        - post creation state
 */
 
 import React, { useEffect, useState } from "react";
@@ -28,6 +35,7 @@ import ActorDisplayComponent from "./ActorDisplay";
 import ContentDisplay from "./ContentDisplay";
 import useTheme from "../hooks/useTheme";
 import { useLotideCtx } from "../hooks/useLotideCtx";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 export interface CommunityFinderProps {
   placeholder?: string;
@@ -37,32 +45,62 @@ export interface CommunityFinderProps {
   onSelect: (community: Community) => void;
 }
 
+type CommunityFinderState = {
+  key: string;
+  communities: Community[];
+};
+
 export default function CommunityFinder(props: CommunityFinderProps) {
-  const [communities, setCommunities] = useState<Paged<Community>>();
   const [filterText, setFilterText] = useState("");
   const ctx = useLotideCtx();
   const theme = useTheme();
+  const listKey = [
+    ctx?.apiUrl ?? "",
+    ctx?.login?.user?.id ?? "anonymous",
+    props.onlyFollowing ? "mine" : "everything",
+    props.focusId ?? 0,
+  ].join("|");
+  const [communityState, setCommunityState] =
+    useState<CommunityFinderState>();
+  const communities =
+    communityState?.key === listKey ? communityState.communities : undefined;
 
   const communitiesToDisplay = (() => {
     if (props.onlyWhenTyping && filterText === "") return [];
     if (!communities) return [];
-    if (filterText === "") return communities.items;
-    return communities.items.filter(c =>
+    if (filterText === "") return communities;
+    return communities.filter(c =>
       c.name.toLowerCase().includes(filterText.toLowerCase()),
     );
   })();
 
   useEffect(() => {
     if (!ctx) return;
-    LotideService.getCommunities(ctx, props.onlyFollowing || false)
-      .then(setCommunities)
+
+    let isActive = true;
+
+    LotideService.getAllCommunities(ctx, props.onlyFollowing || false)
+      .then(communities => {
+        if (isActive) {
+          setCommunityState({
+            key: listKey,
+            communities,
+          });
+        }
+      })
       .catch(() => {
-        setCommunities({
-          items: [],
-          next_page: null,
-        });
+        if (isActive) {
+          setCommunityState({
+            key: listKey,
+            communities: [],
+          });
+        }
       });
-  }, [ctx, props.focusId, props.onlyFollowing]);
+
+    return () => {
+      isActive = false;
+    };
+  }, [ctx, listKey, props.onlyFollowing]);
 
   const renderItem = ({ item }: { item: Community }) => {
     const description = item.description;
@@ -168,6 +206,7 @@ export default function CommunityFinder(props: CommunityFinderProps) {
 const styles = StyleSheet.create({
   input: {
     marginHorizontal: 25,
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingVertical: 10,
   },
   list: {
@@ -178,6 +217,7 @@ const styles = StyleSheet.create({
     flexDirection: "column",
     justifyContent: "space-between",
     alignItems: "stretch",
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth || 1,
     paddingHorizontal: 20,

@@ -48,7 +48,7 @@ jest.mock("../../hooks/useTheme", () => ({
 jest.mock("../../services/LotideService", () => ({
   __esModule: true,
   ...jest.requireActual("../../services/LotideService"),
-  getCommunities: (...args: unknown[]) => mockGetCommunities(...args),
+  getAllCommunities: (...args: unknown[]) => mockGetCommunities(...args),
   getInstanceInfo: (...args: unknown[]) => mockGetInstanceInfo(...args),
   submitPost: (...args: unknown[]) => mockSubmitPost(...args),
   getPost: (...args: unknown[]) => mockGetPost(...args),
@@ -103,23 +103,20 @@ describe("NewPostScreen", () => {
       software: { name: "Lotide", version: "0.19.0" },
       apiVersion: 19,
     });
-    mockGetCommunities.mockResolvedValue({
-      items: [
-        {
-          id: 1,
-          name: "lotide",
-          host: "lotide.fbxl.net",
-          local: false,
-        },
-        {
-          id: 2,
-          name: "narwhal",
-          host: "narwhal.city",
-          local: false,
-        },
-      ],
-      next_page: null,
-    });
+    mockGetCommunities.mockResolvedValue([
+      {
+        id: 1,
+        name: "lotide",
+        host: "lotide.fbxl.net",
+        local: false,
+      },
+      {
+        id: 2,
+        name: "narwhal",
+        host: "narwhal.city",
+        local: false,
+      },
+    ]);
     mockSubmitPost.mockResolvedValue({ id: 99 });
     mockGetPost.mockResolvedValue({
       id: 99,
@@ -268,6 +265,44 @@ describe("NewPostScreen", () => {
       );
     });
     expect(mockGetPost).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalled();
+  });
+
+  test("shows a friendly alert when the created post cannot be reloaded", async () => {
+    mockGetPost.mockRejectedValue(new Error("post vanished"));
+    const navigation = {
+      addListener: jest.fn().mockReturnValue(() => {}),
+      navigate: jest.fn(),
+    };
+    const route = {
+      key: "new-post",
+      name: "NewPostScreen",
+      params: {
+        community: {
+          id: 1,
+          name: "lotide",
+          host: "lotide.fbxl.net",
+          local: false,
+        },
+      },
+    };
+
+    const { screen } = await renderWithStore(
+      <NewPostScreen navigation={navigation as never} route={route as never} />,
+    );
+
+    await fireEvent.changeText(
+      screen.getByPlaceholderText("Add a Title"),
+      "Lotide launch",
+    );
+    await fireEvent.press(screen.getByText("Submit"));
+
+    await waitFor(() => {
+      expect(Alert.alert).toHaveBeenCalledWith(
+        "Could not submit post",
+        "post vanished",
+      );
+    });
     expect(navigation.navigate).not.toHaveBeenCalled();
   });
 

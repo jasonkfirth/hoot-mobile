@@ -7,11 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#2c1324"
-    },
     "updates": {
       "fallbackToCacheTimeout": 0
     },
@@ -48,7 +43,14 @@
       "expo-task-manager",
       "expo-notifications",
       "expo-system-ui",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#2c1324"
+        }
+      ],
       "expo-status-bar",
       "expo-web-browser"
     ]

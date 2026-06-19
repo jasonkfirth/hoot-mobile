@@ -4,7 +4,7 @@ Hoot Mobile Changelog
 Version 0.2.0
 -------------
 
-Date: 2026-06-17
+Date: 2026-06-19
 
 Overview:
 
@@ -20,6 +20,10 @@ Overview:
 
   * Added file headers, section banners, and end-of-file markers across the
     TypeScript and TSX source files touched by this pass.
+
+  * Added the Hitide/Lotide 0.18.0 compatibility pass for source feeds,
+    private messages, and user follows while keeping the new surfaces gated for
+    older servers.
 
 Lotide API compatibility:
 
@@ -58,6 +62,25 @@ Lotide API compatibility:
   * Added moderation support for moderated-community lists, pending community
     flags, and community flag dismissal.
 
+  * Added gated Lotide 0.18 collection target support through the
+    collection_targets API. Hoot can now list source feeds, load source-feed
+    details, read cached source items, follow and unfollow source feeds, like
+    and unlike source preview items, and comment on source items when the
+    backend reports a compatible reply path. Source lists now also expose the
+    server's software-count filters so users can narrow feeds by the supported
+    Lotide 0.18 source families.
+
+  * Added gated Lotide 0.18 private-message support through
+    users/~me/messages. Hoot can now load the conversation list, load threads,
+    send replies chained to the latest known message, and dismiss conversations
+    until new activity arrives.
+
+  * Added gated Lotide 0.18 user-follow support through the new
+    users/:id/follow and users/:id/unfollow endpoints. Other-user profile
+    activity screens can now show the remote profile header, follow or unfollow
+    the user, and open a private-message thread when the server supports the
+    required APIs.
+
 Response handling and validation:
 
   * Added services/LotideService/validation.ts to normalize untrusted Lotide
@@ -79,8 +102,30 @@ Response handling and validation:
   * Kept typed Lotide notifications and user activity records aligned with the
     server's serialized response enums, including user follow notifications.
 
+  * Added runtime normalization for Lotide collection target lists, source
+    details, source item reader responses, source item comments, source item
+    votes, and private-message records.
+
+  * Added centralized feature gates for source feeds, private messages, and
+    user follows, plus the existing user-follow notification gate, so partial
+    or older Lotide instances degrade by hiding unsupported mobile entry points
+    rather than failing at navigation time.
+
+  * Validated Lotide 0.18 mutation responses that Hoot depends on before
+    updating local UI state. Source-item comments must return a usable id,
+    private-message sends must return a private-message record, and
+    private-message dismissals must confirm dismissal.
+
   * Added a shared utility for converting unknown thrown values into user-safe
     alert messages.
+
+  * Hardened startup synchronization so transient instance/profile failures no
+    longer erase a valid stored login. Explicit authentication failures now
+    expire the login while preserving the selected server context.
+
+  * Added defensive AsyncStorage parsing for active context and saved account
+    records. Corrupt JSON now self-heals to a safe signed-out state instead of
+    crashing startup or the account picker.
 
 Notification reliability:
 
@@ -99,12 +144,59 @@ Notification reliability:
     flag. This lets Hoot notify for a phone-new notification even if Hitide or
     another client already fetched the notifications endpoint first.
 
+  * Made empty notification baselines explicit. A newly enabled account with no
+    current notifications now still alerts for the next phone-new notification,
+    even if another client has cleared Lotide's unseen flag by the time Hoot
+    polls.
+
+  * Added app startup and foreground-resume notification polling so enabled
+    Android devices do not have to wait only for the operating system's
+    background task window to notice new Lotide notifications.
+
+  * Raised the Android Lotide notification channel to high importance and added
+    default notification sound to local alerts.
+
+  * Versioned the Android notification channel as lotide-notifications-v2 so
+    upgraded installs are not stuck with an older default-importance channel
+    that Android will not raise programmatically.
+
+  * Moved notification permission prompting into the enablement transaction.
+    Enabling notifications now creates the channel and asks the OS permission
+    before creating the local baseline or storing the enabled flag.
+
+  * Preserved the post and comment records embedded in Lotide notification
+    responses so the notification screen can render freshly returned
+    notifications before the normal post/comment caches have seen them.
+
+  * Distinguished reply and mention notification text in both the notification
+    screen and local Android alert titles.
+
   * Added notification poller tests covering enable-time baselining,
-    cross-client unseen clearing, and first-run old-history suppression.
+    denied OS notification permission, cross-client unseen clearing, and
+    first-run old-history suppression.
 
   * Added an Android-only settings toggle for background notifications and
     updated the settings text to describe OS-controlled background checks
     rather than promising a fixed polling interval.
+
+  * Added notification tap routing for both warm app and cold-start launches.
+    Reply notifications now open the related post with the reply highlighted;
+    user-follow notifications open the notification list.
+
+  * Added private-message notification support. Lotide 0.18 private-message
+    notifications now render in the notification screen, produce local Android
+    alerts, and route notification taps directly to the sender conversation.
+
+  * Added a foreground notification handler using the current Expo
+    shouldShowBanner and shouldShowList fields.
+
+  * Made notification enablement transactional. The app now verifies local
+    notification permission and creates the local notification baseline before
+    storing the enabled flag, and rolls back the setting if registration fails.
+
+  * Made task-registration availability part of the user-facing enablement
+    transaction. If Android reports background tasks unavailable, the setting is
+    left disabled instead of appearing enabled without a registered task.
 
   * Remaining limitation: this is still local polling. If the app is
     user-force-killed, Android and iOS may not run background tasks. True
@@ -121,6 +213,14 @@ Navigation, screens, and flows:
     search, new posts, notifications, profile, posts, comments, communities,
     profile activity, moderation, settings, and not-found fallback paths.
 
+  * Added gated Feeds navigation for Lotide 0.18 source feeds, including the
+    source list tab/drawer entry, source detail screen, source item reader, and
+    deep links for source detail and source item routes.
+
+  * Added gated Messages navigation for Lotide 0.18 private messages, including
+    the messages tab/drawer entry, conversation thread screen, and deep links
+    for conversation routes.
+
   * Added ProfileActivityScreen.tsx to display the user's mixed post and
     comment activity from Lotide, including pagination and navigation back to
     related posts.
@@ -135,6 +235,10 @@ Navigation, screens, and flows:
   * Reworked SearchScreen and CommunityFinder so community browsing has Mine
     and Everything tabs backed by the current Lotide community list API.
 
+  * Added all-page community loading with repeated-cursor detection and a page
+    safety limit. Community search, new-post community selection, and the
+    profile followed-community list now see communities beyond the first page.
+
   * Restored dev.narwhal.city to the seeded login host list after checking the
     old GitHub host list against live Lotide instance endpoints.
 
@@ -146,9 +250,27 @@ Navigation, screens, and flows:
     explicit retry/loading states instead of failing silently or crashing when
     posts, comments, authors, or communities are missing.
 
+  * Made feed loading key-aware so sort, community, follow-scope, and account
+    changes reset visible feed state and stale in-flight requests cannot append
+    into a newer feed.
+
+  * Split explicit "not in your follows" feed requests from omitted follow
+    filters in the feed-state key, and prevented the signed-out feed prompt from
+    starting an invisible authenticated feed request.
+
+  * Updated post sharing to use the post remote_url when available and otherwise
+    derive the post URL from the current Lotide instance instead of hard-coding
+    a development host.
+
   * Reworked NotificationScreen to handle reply notifications, user-follow
-    notifications, empty states, fetch failures, and navigation to highlighted
-    replies.
+    notifications, private-message notifications, empty states, fetch failures,
+    and navigation to highlighted replies, follower profiles, or conversation
+    threads.
+
+  * Reworked ProfileActivityScreen for other users so it can load profile
+    header data, show follow state, follow or unfollow users on API 18 servers,
+    and open a private-message conversation when private messages are
+    available.
 
   * Reworked SettingsScreen to remove the deprecated react-native-settings-screen
     dependency and provide an in-app settings UI for the Lotide API URL, static
@@ -157,6 +279,9 @@ Navigation, screens, and flows:
   * Updated NewPostScreen, NewCommunity, EditCommunityScreen, and
     ForgotPasswordScreen for current React Native props, better error messages,
     and safer navigation after successful requests.
+
+  * Added user-visible failure handling for vote requests, comment submission,
+    post-create reloads, password reset key checks, and password reset submits.
 
 Rendering, theme, and UI behavior:
 
@@ -185,6 +310,10 @@ Rendering, theme, and UI behavior:
     press handling to tabs, host/profile selectors, post/community links, and
     retry actions.
 
+  * Centralized the supported Lotide API version floor so startup checks and the
+    known-host picker agree that API version 8 is the minimum supported server
+    surface.
+
   * Updated SwipeAction, Hoverable, HoverHighlight, TappableList, VoteCounter,
     HrefDisplay, ElapsedTime, StyledText, SuggestLogin, and Themed for the
     stricter current React Native and TypeScript surface.
@@ -209,6 +338,18 @@ Dependency and tooling modernization:
     @types/react-native-htmlview, @types/react-native, and
     react-native-settings-screen.
 
+  * Overrode react-native-render-html's native-html render engine to the
+    current @native-html/transient-render-engine 12.x line. That brings in the
+    current CSS processor and removes the deprecated @types/react-native peer
+    package from the reproducible npm graph.
+
+  * Removed Hoot's direct fbjs dependency by replacing the hover helper's DOM
+    capability check with a local typed globalThis probe.
+
+  * Removed unused direct dependencies on react-is, redux-thunk, uglify-js, and
+    patch-package. The empty patch-package postinstall hook was removed because
+    the repo no longer carries patch files.
+
   * Added expo-background-task, expo-notifications, expo-system-ui,
     expo-task-manager, react-native-render-html, react-native-worklets,
     @react-native/jest-preset, @testing-library/react-native, ESLint, Jest
@@ -218,6 +359,15 @@ Dependency and tooling modernization:
     builds, npm test runs Jest once by default, npm run test:watch keeps the
     old watch behavior, npm run lint runs ESLint with zero warnings, and
     npm run build:android invokes the Debian Android build script.
+
+  * Routed npm run android through build_scripts/android-env.sh so local device
+    launches use Java 17, the local Android SDK, and a development NODE_ENV
+    even when the host system default Java is newer than the Android native
+    build toolchain accepts.
+
+  * Extended the Android environment wrapper to export ANDROID_AVD_HOME, so
+    emulator commands find AVDs created under XDG_CONFIG_HOME as well as the
+    traditional ~/.android/avd directory.
 
   * Moved Jest configuration out of package.json into jest.config.js and added
     jest.setup.js with current Expo, React Native, AsyncStorage, and navigation
@@ -232,13 +382,18 @@ Dependency and tooling modernization:
     ESLint with unused-disable checks, text hygiene checks for Git-visible
     tracked and untracked files, and TypeScript no-emit validation.
 
+  * Extended the text hygiene check to reject tab characters in source,
+    configuration, and documentation files, and cleaned the existing tabbed
+    indentation left in touched TypeScript and test files.
+
   * Added shared ambient Lotide API types and TypeScript configuration so the
     app code, tests, Jest globals, and React Native runtime types validate
     together without the old global Comment collision.
 
   * Added npm overrides for uuid, babel-plugin-istanbul,
-    eslint-import-resolver-typescript, glob, js-yaml, and jsdom so validation
-    and audit use current fixed packages instead of npm's downgrade path.
+    eslint-import-resolver-typescript, glob, js-yaml, jsdom, undici, and the
+    native-html render engine so validation and audit use current fixed
+    packages instead of npm's downgrade path.
 
 Native Android and build outputs:
 
@@ -247,9 +402,17 @@ Native Android and build outputs:
     Android manifests, ProGuard rules, splash assets, launcher icons, colors,
     strings, and styles.
 
+  * Added build_scripts/android-env.sh for shared Java 17 and Android SDK
+    discovery across local Android development commands.
+
   * Added build_scripts/debian-build-hoot-mobile-android.sh and
     build_scripts/debian-test-hoot-mobile-android.sh for reproducible Debian
     Android build/test validation.
+
+  * Hardened the Android emulator smoke-test helper so it resolves AVD metadata
+    from avdmanager, supports XDG_CONFIG_HOME AVD locations, and reports recent
+    emulator logs instead of waiting forever when the emulator exits before ADB
+    or boot completion.
 
   * Added .gitignore rules for Android native build output:
     android/.gradle, android/build, android/app/build, and android/**/.cxx.
@@ -257,8 +420,13 @@ Native Android and build outputs:
   * Added .vscode/settings.json to keep Java/Gradle build-configuration
     updates interactive in VS Code.
 
-  * Added generated web distribution files under dist, including index.html,
-    metadata.json, CNAME, favicon.ico, and the bundled SpaceMono font asset.
+  * Documented dist as generated web output and ignored it so release commits
+    do not accidentally carry stale Expo web artifacts.
+
+  * Documented that android/ is intentionally checked in and that native app
+    metadata in app.json must be mirrored into the Android project when it
+    changes. Disabled Expo Doctor's matching app-config sync warning so the
+    intentional native-project layout does not mask real doctor failures.
 
 Assets and app metadata:
 
@@ -266,6 +434,12 @@ Assets and app metadata:
     icon, and splash image.
 
   * Enabled Metro for the web bundler in app.json.
+
+  * Moved splash-screen configuration from the deprecated top-level Expo
+    splash field into the expo-splash-screen config plugin options.
+
+  * Regenerated the Android splash-screen drawable assets from the current
+    orange splash image through Expo prebuild.
 
   * Kept the Expo/EAS project id and Android package id attached to the app
     metadata.
@@ -294,20 +468,36 @@ Tests and validation:
 
   * Added and updated Lotide service tests for community lists, follow
     responses, community edit payloads, posts, comments, user activity,
-    notifications, instance metadata, utility request handling, and runtime
+    notifications, source feeds, private messages, user-follow endpoints,
+    instance metadata, utility request handling, pagination, and runtime
     response normalization.
 
   * Added component, hook, screen, and notification-poller tests covering
     CommunityFinder, HostList, PostDisplay, RetryState, TappableList,
     useRefreshableData, CommunityScreen, ModerationScreen, NewPostScreen,
     NotificationScreen, ProfileActivityScreen, ProfileScreen, SearchScreen,
-    and LotideNotificationPoller.
+    source and message notification paths, and LotideNotificationPoller.
+
+  * Added ProfileScreen coverage for paginated followed-community loading so
+    the profile page matches the current Lotide community list contract.
+
+  * Added regression tests for feed stale-request handling, storage corruption
+    recovery, all-page community loading, notification tap routing, notification
+    enablement rollback, API version gating, source-feed gates,
+    private-message gates, and post-create reload failures.
 
   * Verified the current dependency and validation state:
     npx expo install --check reports the Expo SDK 56 package set is current,
-    npm audit reports zero vulnerabilities, npm run lint passes,
-    npx tsc --noEmit passes, npm test passes 21 suites and 102 tests, and
-    the Android release APK build completes successfully.
+    npm audit reports zero vulnerabilities, npm run lint:strict passes,
+    npx expo-doctor passes, npm test passes 25 suites and 146 tests, Expo
+    Android prebuild completes without source drift, Expo web export succeeds,
+    the Android debug build succeeds under Java 17, the Android release APK
+    build completes successfully, and the release APK installs and launches on
+    the local Android emulator.
+
+  * Verified the npm deprecation state after the cleanup. package-lock.json no
+    longer records deprecated packages, and a recursive installed-package scan
+    of node_modules found no package metadata with a deprecated field.
 
 Compatibility note:
 

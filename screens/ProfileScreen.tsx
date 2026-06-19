@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Show the logged-in user profile and account actions.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load profile and followed communities
+        - Render profile description and account rows
+        - Handle logout and navigation to activity/moderation/settings
+
+    This file intentionally does NOT contain:
+
+        - profile editing
+        - moderation flag detail
 */
 
 import React, { useEffect, useState } from "react";
@@ -29,6 +36,7 @@ import { setCtx } from "../slices/lotideSlice";
 import { TappableList } from "../components/TappableList";
 import ContentDisplay from "../components/ContentDisplay";
 import RetryState from "../components/RetryState";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 export default function ProfileScreen({
   navigation,
@@ -49,16 +57,24 @@ export default function ProfileScreen({
 
   useEffect(() => {
     if (!ctx?.login) return;
-    // TODO: Use the pagination feature
-    LotideService.getCommunities(ctx, true)
+
+    let isActive = true;
+
+    LotideService.getAllCommunities(ctx, true)
       .then(communities => {
+        if (!isActive) return;
         setProfileLoadError("");
-        setCommunities(communities.items);
+        setCommunities(communities);
       })
       .catch(() => {
+        if (!isActive) return;
         setCommunities([]);
         setProfileLoadError("");
       });
+
+    return () => {
+      isActive = false;
+    };
   }, [ctx, focusId]);
 
   useEffect(() => {
@@ -313,8 +329,8 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   input: {
-    height: 40,
     borderWidth: 1,
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingVertical: 10,
     paddingHorizontal: 20,
     width: "100%",

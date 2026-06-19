@@ -6,15 +6,23 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Show a community profile and its posts.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load community metadata by route id
+        - Render follow/edit actions
+        - Page through community posts
+
+    This file intentionally does NOT contain:
+
+        - community search
+        - new post composition
 */
 
 import React, { useEffect, useState } from "react";
-import { Alert, Button, FlatList, Pressable, StyleSheet } from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet } from "react-native";
+import AppButton from "../components/AppButton";
 import { View, Text } from "../components/Themed";
 import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
@@ -139,11 +147,17 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   buttons: {
+    alignItems: "center",
     display: "flex",
     flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
     width: "100%",
-    justifyContent: "space-around",
-    alignItems: "center",
+    justifyContent: "flex-start",
+    marginTop: 15,
+  },
+  headerButton: {
+    minWidth: 88,
   },
   item: {
     marginVertical: 0,
@@ -293,35 +307,39 @@ const ListHeader = React.memo(function ListHeader(props: ListHeaderProps) {
       </View>
       {!!ctx && (
         <View style={[styles.buttons]}>
-          <Button
+          <AppButton
             onPress={() => navigation.navigate("NewPostScreen", { community })}
             title="Post"
             color={theme.tint}
             accessibilityLabel="Post to this community"
+            style={styles.headerButton}
           />
           {community.you_are_moderator && (
-            <Button
+            <AppButton
               onPress={() =>
                 navigation.navigate("EditCommunity", { community })
               }
               title="Edit"
               color={theme.tint}
               accessibilityLabel="Edit your community community"
+              style={styles.headerButton}
             />
           )}
           {isFollowing ? (
-            <Button
+            <AppButton
               onPress={unfollow}
               title="Unfollow"
               color={theme.secondaryTint}
               accessibilityLabel="Stop seeing posts from this community"
+              style={styles.headerButton}
             />
           ) : (
-            <Button
+            <AppButton
               onPress={follow}
               title="Follow"
               color={theme.tint}
               accessibilityLabel="See posts from this community in your feed"
+              style={styles.headerButton}
             />
           )}
         </View>

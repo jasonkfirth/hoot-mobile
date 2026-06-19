@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Store the currently expanded comment action target.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Read selected comment id from Redux
+        - Dispatch selection changes
+
+    This file intentionally does NOT contain:
+
+        - comment fetching
+        - navigation
 */
 
 import { useDispatch, useSelector } from "react-redux";

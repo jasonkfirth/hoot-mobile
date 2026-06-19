@@ -30,6 +30,9 @@ import configureStoreMock from "redux-mock-store";
 import ProfileActivityScreen from "../ProfileActivityScreen";
 
 const mockGetUserThings = jest.fn();
+const mockGetUserData = jest.fn();
+const mockFollowUser = jest.fn();
+const mockUnfollowUser = jest.fn();
 
 jest.mock("../../hooks/useTheme", () => ({
   __esModule: true,
@@ -45,7 +48,10 @@ jest.mock("../../hooks/useTheme", () => ({
 jest.mock("../../services/LotideService", () => ({
   __esModule: true,
   ...jest.requireActual("../../services/LotideService"),
+  followUser: (...args: unknown[]) => mockFollowUser(...args),
+  getUserData: (...args: unknown[]) => mockGetUserData(...args),
   getUserThings: (...args: unknown[]) => mockGetUserThings(...args),
+  unfollowUser: (...args: unknown[]) => mockUnfollowUser(...args),
 }));
 
 const mockStore = configureStoreMock([]);
@@ -55,10 +61,11 @@ function renderWithStore(ui: React.ReactElement) {
     <Provider
       store={mockStore({
         lotide: {
-          ctx: {
-            apiUrl: "https://lotide.fbxl.net/api/unstable",
-            login: {
-              token: "token-1",
+            ctx: {
+              apiUrl: "https://lotide.fbxl.net/api/unstable",
+              apiVersion: 18,
+              login: {
+                token: "token-1",
               user: { id: 1, username: "sj_zero", host: "lotide.fbxl.net" },
             },
           },
@@ -88,6 +95,22 @@ describe("ProfileActivityScreen", () => {
       ],
       next_page: null,
     });
+    mockGetUserData.mockResolvedValue({
+      id: 1,
+      username: "sj_zero",
+      host: "lotide.fbxl.net",
+      local: true,
+      description: {
+        content_text: "I use Lotide.",
+        content_markdown: null,
+        content_html: null,
+      },
+    });
+    mockFollowUser.mockResolvedValue({
+      accepted: false,
+      federation_status: "sent",
+    });
+    mockUnfollowUser.mockResolvedValue(undefined);
   });
 
   test("loads activity and opens the related post for comments", async () => {
@@ -217,6 +240,53 @@ describe("ProfileActivityScreen", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Cannot load activity")).toBeTruthy();
+    });
+  });
+
+  test("offers follow and message actions for other users on Lotide 0.18", async () => {
+    const navigation = { navigate: jest.fn() };
+    const route = {
+      key: "profile-activity",
+      name: "ProfileActivity",
+      params: { userId: 2, username: "remote" },
+    };
+    mockGetUserThings.mockResolvedValue({
+      items: [],
+      next_page: null,
+    });
+    mockGetUserData.mockResolvedValue({
+      id: 2,
+      username: "remote",
+      host: "remote.example",
+      local: false,
+      your_follow: undefined,
+    });
+
+    const screen = await renderWithStore(
+      <ProfileActivityScreen
+        navigation={navigation as never}
+        route={route as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("remote")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Follow remote" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Message remote" })).toBeTruthy();
+    });
+
+    await fireEvent.press(screen.getByRole("button", { name: "Follow remote" }));
+    await waitFor(() => {
+      expect(mockFollowUser).toHaveBeenCalledWith(
+        expect.objectContaining({ apiVersion: 18 }),
+        2,
+      );
+    });
+
+    await fireEvent.press(screen.getByRole("button", { name: "Message remote" }));
+    expect(navigation.navigate).toHaveBeenCalledWith("MessageThread", {
+      userId: 2,
+      username: "remote",
     });
   });
 });

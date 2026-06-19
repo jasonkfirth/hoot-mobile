@@ -44,6 +44,7 @@ import RenderHtml, {
 } from "react-native-render-html";
 import Icon from "@expo/vector-icons/Ionicons";
 import useTheme from "../hooks/useTheme";
+import { TOUCH_TARGET_HIT_SLOP } from "../constants/TouchTargets";
 
 export interface ContentDisplayProps {
   contentHtml?: string | null;
@@ -249,6 +250,9 @@ function AbbrRenderer({
 }: CustomRendererProps<TPhrasing | TBlock>) {
   return (
     <Pressable
+      accessibilityLabel="Show abbreviation"
+      accessibilityRole="button"
+      hitSlop={TOUCH_TARGET_HIT_SLOP}
       onPress={() => Alert.alert("Abbr.", tnode.attributes.title)}
     >
       <Text
@@ -274,7 +278,12 @@ function DetailsRenderer({
 
   return (
     <View>
-      <Pressable hitSlop={5} onPress={() => setIsOpen(x => !x)}>
+      <Pressable
+        accessibilityLabel={isOpen ? "Collapse details" : "Expand details"}
+        accessibilityRole="button"
+        hitSlop={TOUCH_TARGET_HIT_SLOP}
+        onPress={() => setIsOpen(x => !x)}
+      >
         <Text style={{ color: theme.secondaryTint }}>
           {isOpen ? (
             <Icon name="chevron-down-outline" />

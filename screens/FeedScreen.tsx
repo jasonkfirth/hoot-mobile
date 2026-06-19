@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Show the authenticated home feed.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Render paged posts for the selected sort
+        - Support pull-to-refresh and endless loading
+        - Handle swipe vote/reply actions
+
+    This file intentionally does NOT contain:
+
+        - post detail rendering
+        - community search
 */
 
 import React, { useState } from "react";
@@ -41,6 +48,7 @@ export default function FeedScreen({
   const [posts, loadNextPage, resetPosts, feedLoadError] = useFeed({
     sort,
     inYourFollows: true,
+    enabled: !!ctx?.login,
   });
   if (!ctx?.login) return <SuggestLogin />;
   const renderItem = ({ item }: { item: PostId }) => <Item postId={item} />;
@@ -171,10 +179,7 @@ const LoadedItem = ({ postId, post }: { postId: PostId; post: Post }) => {
           ...(Platform.OS === "web" ? { cursor: "pointer" } : {}),
         }}
         onPress={() => navigation.navigate("Post", { postId })}
-        onLongPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          console.log(post);
-        }}
+        onLongPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)}
       >
         <View style={[]}>
           <PostDisplay

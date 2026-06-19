@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Browse communities from the search tab.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Switch between followed and global community lists
+        - Navigate to selected community details
+
+    This file intentionally does NOT contain:
+
+        - host login
+        - post search
 */
 
 import React, { useEffect, useState } from "react";
@@ -21,6 +27,7 @@ import CommunityFinder from "../components/CommunityFinder";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import { Text } from "../components/Themed";
 import useTheme from "../hooks/useTheme";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 type CommunityTab = "mine" | "everything";
 
@@ -114,8 +121,11 @@ const styles = StyleSheet.create({
     paddingTop: 15,
   },
   tab: {
+    alignItems: "center",
     borderRadius: 6,
+    justifyContent: "center",
     marginRight: 10,
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },

@@ -4,7 +4,7 @@
   "homepage": "https://hoot.brokenlamp.org",
   "scripts": {
     "start": "expo start",
-    "android": "expo run:android",
+    "android": "./build_scripts/android-env.sh expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "build:android": "./build_scripts/debian-build-hoot-mobile-android.sh",
@@ -13,8 +13,7 @@
     "test:watch": "jest --watchAll",
     "lint": "eslint . --max-warnings=0",
     "lint:text": "node scripts/check-text-hygiene.js",
-    "lint:strict": "npm run lint -- --report-unused-disable-directives && npm run lint:text && npx tsc --noEmit --pretty false",
-    "postinstall": "patch-package"
+    "lint:strict": "npm run lint -- --report-unused-disable-directives && npm run lint:text && npx tsc --noEmit --pretty false"
   },
   "dependencies": {
     "@babel/preset-env": "^7.29.7",
@@ -39,11 +38,9 @@
     "expo-system-ui": "~56.0.5",
     "expo-task-manager": "~56.0.19",
     "expo-web-browser": "~56.0.5",
-    "fbjs": "^3.0.0",
     "immer": "^11.1.8",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-is": "^19.0.0",
     "react-native": "^0.85.3",
     "react-native-gesture-handler": "~2.31.1",
     "react-native-reanimated": "4.3.1",
@@ -55,16 +52,13 @@
     "react-native-worklets": "^0.8.3",
     "react-redux": "^9.1.0",
     "redux": "^5.0.0",
-    "redux-thunk": "^3.1.0",
     "styled-components": "^6.1.0",
-    "uglify-js": "^3.17.4",
     "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
     "@react-native/jest-preset": "^0.85.3",
     "@testing-library/react-native": "^14.0.0",
-    "@types/fbjs": "^3.0.2",
     "@types/jest": "^29.5.14",
     "@types/node": "^25.9.3",
     "@types/react": "^19.2.17",
@@ -79,7 +73,6 @@
     "jest-environment-jsdom": "~29.7.0",
     "jest-environment-node": "~29.7.0",
     "jest-expo": "^56.0.5",
-    "patch-package": "^8.0.0",
     "redux-mock-store": "^1.5.5",
     "test-renderer": "^1.2.0",
     "typescript": "~6.0.3"
@@ -89,13 +82,24 @@
   },
   "private": true,
   "name": "hoot-mobile",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "overrides": {
     "uuid": "^14.0.0",
     "babel-plugin-istanbul": "^8.0.0",
     "eslint-import-resolver-typescript": "^4.4.5",
     "glob": "^13.0.0",
     "js-yaml": "^4.2.0",
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "react-native-render-html": {
+      "@native-html/transient-render-engine": "^12.0.1"
+    },
+    "undici": "^8.5.0"
+  },
+  "expo": {
+    "doctor": {
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
+      }
+    }
   }
 }

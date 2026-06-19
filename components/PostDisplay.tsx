@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Render a single Lotide post body and metadata.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Load missing post data when needed
+        - Render author, content, link, community, score, and reply count
+        - Provide retry handling for failed post loads
+
+    This file intentionally does NOT contain:
+
+        - feed pagination
+        - comment tree rendering
 */
 
 import React, { useState } from "react";
@@ -25,10 +32,17 @@ import ActorDisplayComponent from "./ActorDisplay";
 import usePost from "../hooks/usePost";
 import HrefDisplay from "./HrefDisplay";
 import RetryState from "./RetryState";
+import { RootTabScreenProps } from "../types";
+import { TOUCH_TARGET_HIT_SLOP } from "../constants/TouchTargets";
+
+type PostDisplayNavigation = Pick<
+  RootTabScreenProps<"FeedScreen">["navigation"],
+  "navigate"
+>;
 
 export interface PostDisplayProps {
   postId: PostId;
-  navigation: any;
+  navigation: PostDisplayNavigation;
   truncateContent?: boolean;
   showAuthor?: boolean;
 }
@@ -98,7 +112,7 @@ export default function PostDisplay(props: PostDisplayProps) {
           }
           accessibilityRole="button"
           accessibilityState={{ disabled: !canOpenCommunity }}
-          hitSlop={8}
+          hitSlop={TOUCH_TARGET_HIT_SLOP}
           onPress={() =>
             canOpenCommunity &&
             props.navigation.navigate("Community", {

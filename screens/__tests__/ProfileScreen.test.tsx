@@ -29,7 +29,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import ProfileScreen from "../ProfileScreen";
 
 const mockGetUserData = jest.fn();
-const mockGetCommunities = jest.fn();
+const mockGetAllCommunities = jest.fn();
 const mockEmitter = {
   addListener: jest.fn(),
 };
@@ -52,7 +52,7 @@ jest.mock("../../services/LotideService", () => ({
   __esModule: true,
   ...jest.requireActual("../../services/LotideService"),
   getUserData: (...args: unknown[]) => mockGetUserData(...args),
-  getCommunities: (...args: unknown[]) => mockGetCommunities(...args),
+  getAllCommunities: (...args: unknown[]) => mockGetAllCommunities(...args),
 }));
 
 jest.mock("react-native/Libraries/EventEmitter/NativeEventEmitter", () => {
@@ -78,17 +78,14 @@ describe("ProfileScreen", () => {
         content_text: "I use Lotide everywhere.",
       },
     });
-    mockGetCommunities.mockResolvedValue({
-      items: [
-        {
-          id: 1,
-          name: "lotide",
-          host: "lotide.fbxl.net",
-          local: false,
-        },
-      ],
-      next_page: null,
-    });
+    mockGetAllCommunities.mockResolvedValue([
+      {
+        id: 1,
+        name: "lotide",
+        host: "lotide.fbxl.net",
+        local: false,
+      },
+    ]);
   });
 
   function renderWithContext(ui: React.ReactElement) {
@@ -135,11 +132,44 @@ describe("ProfileScreen", () => {
 
     expect(screen.getByText("sj_zero")).toBeTruthy();
     expect(screen.getByText("I use Lotide everywhere.")).toBeTruthy();
-    expect(mockGetCommunities).toHaveBeenCalledWith(
+    expect(mockGetAllCommunities).toHaveBeenCalledWith(
       expect.objectContaining({ apiUrl: "https://lotide.fbxl.net/api/unstable" }),
       true,
     );
     expect(screen.getByText("lotide")).toBeTruthy();
+  });
+
+  test("renders every followed community returned by the service", async () => {
+    const navigation = { addListener: jest.fn() } as never;
+    mockGetAllCommunities.mockResolvedValueOnce([
+      {
+        id: 1,
+        name: "lotide",
+        host: "lotide.fbxl.net",
+        local: false,
+      },
+      {
+        id: 2,
+        name: "announcements",
+        host: "lotide.fbxl.net",
+        local: true,
+      },
+    ]);
+
+    const screen = await renderWithContext(
+      <ProfileScreen navigation={navigation} route={baseRoute as never} />,
+    );
+
+    await waitFor(() => {
+      expect(mockGetAllCommunities).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockGetAllCommunities).toHaveBeenCalledWith(
+      expect.objectContaining({ apiUrl: "https://lotide.fbxl.net/api/unstable" }),
+      true,
+    );
+    expect(screen.getByText("lotide")).toBeTruthy();
+    expect(screen.getByText("announcements")).toBeTruthy();
   });
 
   test("shows a friendly load error when profile request fails", async () => {

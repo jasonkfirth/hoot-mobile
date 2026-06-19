@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Provide themed text wrappers used by legacy screens.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Expose mono and default text variants
+        - Keep text color aligned with the active theme
+
+    This file intentionally does NOT contain:
+
+        - rich HTML rendering
+        - layout containers
 */
 
 import * as React from 'react';

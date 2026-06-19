@@ -265,6 +265,61 @@ describe("NotificationScreen", () => {
     });
   });
 
+  test("renders embedded notification records before cache fetches complete", async () => {
+    const addListener = jest.fn().mockReturnValue(() => {});
+    const navigation = { addListener } as { addListener: typeof addListener };
+    mockUsePost.mockReturnValue(undefined);
+    mockUseComment.mockReturnValue(undefined);
+    mockGetNotifications.mockResolvedValue([
+      {
+        unseen: true,
+        notificationType: "post_reply",
+        commentId: 31,
+        origin: {
+          type: "post",
+          id: 9,
+        },
+        postId: 9,
+        post: {
+          id: 9,
+          title: "Embedded notification target",
+          author: undefined,
+          community: undefined,
+        },
+        reply: {
+          id: 31,
+          author: {
+            id: 2,
+            username: "commenter",
+            host: "lotide.fbxl.net",
+            local: true,
+          },
+          content_text: "Fresh embedded reply",
+        },
+      },
+    ]);
+
+    const screen = await renderWithStore(
+      <NotificationScreen
+        navigation={navigation as never}
+        route={
+          {
+            key: "NotificationScreen",
+            name: "NotificationScreen",
+            params: undefined,
+          } as never
+        }
+      />,
+      { login: { token: "token-1" } },
+    );
+
+    await waitFor(() => {
+      expect(mockGetNotifications).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Embedded notification target")).toBeTruthy();
+      expect(screen.getByText("Fresh embedded reply")).toBeTruthy();
+    });
+  });
+
   test("opens the related post with highlighted notification comments", async () => {
     const addListener = jest.fn().mockReturnValue(() => {});
     const navigation = { addListener } as { addListener: typeof addListener };
@@ -368,6 +423,87 @@ describe("NotificationScreen", () => {
       expect(mockGetNotifications).toHaveBeenCalledTimes(1);
       expect(screen.getByText("New follower")).toBeTruthy();
       expect(screen.getByText("newfollower")).toBeTruthy();
+    });
+
+    await fireEvent.press(
+      screen.getByRole("button", {
+        name: "Open profile for newfollower",
+      }),
+    );
+    expect(mockNavigate).toHaveBeenCalledWith("ProfileActivity", {
+      userId: 44,
+      username: "newfollower",
+    });
+  });
+
+  test("opens private message notifications as conversation threads", async () => {
+    const addListener = jest.fn().mockReturnValue(() => {});
+    const navigation = { addListener } as { addListener: typeof addListener };
+    mockUsePost.mockReturnValue(undefined);
+    mockUseComment.mockReturnValue(undefined);
+    mockGetNotifications.mockResolvedValue([
+      {
+        unseen: true,
+        kind: "private_message",
+        message: {
+          id: 33,
+          author: {
+            id: 44,
+            username: "sender",
+            host: "example.com",
+            local: false,
+          },
+          recipient: {
+            id: 1,
+            username: "sj_zero",
+            host: "lotide.fbxl.net",
+            local: true,
+          },
+          created: "2026-06-18T12:00:00Z",
+          local: false,
+          content_text: "hello by message",
+          content_html: "<p>hello by message</p>",
+          sensitive: false,
+        },
+      },
+    ]);
+
+    const screen = await renderWithStore(
+      <NotificationScreen
+        navigation={navigation as never}
+        route={
+          {
+            key: "NotificationScreen",
+            name: "NotificationScreen",
+            params: undefined,
+          } as never
+        }
+      />,
+      {
+        login: {
+          token: "token-1",
+          user: {
+            id: 1,
+            username: "sj_zero",
+            host: "lotide.fbxl.net",
+          },
+        },
+      },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("New private message")).toBeTruthy();
+      expect(screen.getByText("hello by message")).toBeTruthy();
+    });
+
+    await fireEvent.press(
+      screen.getByRole("button", {
+        name: "Open message from sender",
+      }),
+    );
+    expect(mockNavigate).toHaveBeenCalledWith("MessageThread", {
+      userId: 44,
+      username: "sender",
     });
   });
 });

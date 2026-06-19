@@ -6,11 +6,17 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Create the Redux store used by the app.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Combine post, comment, and Lotide reducers
+        - Export typed store state and dispatch types
+
+    This file intentionally does NOT contain:
+
+        - persistence
+        - API calls
 */
 
 import { configureStore } from "@reduxjs/toolkit";

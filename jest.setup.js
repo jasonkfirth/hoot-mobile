@@ -103,6 +103,7 @@ jest.mock("expo-linking", () => ({
 jest.mock("expo-notifications", () => ({
   AndroidImportance: {
     DEFAULT: "default",
+    HIGH: "high",
   },
   getPermissionsAsync: jest.fn(() =>
     Promise.resolve({
@@ -114,8 +115,15 @@ jest.mock("expo-notifications", () => ({
       granted: true,
     }),
   ),
+  DEFAULT_ACTION_IDENTIFIER: "expo.modules.notifications.actions.DEFAULT",
+  addNotificationResponseReceivedListener: jest.fn(() => ({
+    remove: jest.fn(),
+  })),
+  clearLastNotificationResponse: jest.fn(),
+  getLastNotificationResponse: jest.fn(() => null),
   scheduleNotificationAsync: jest.fn(() => Promise.resolve("notification-id")),
   setNotificationChannelAsync: jest.fn(() => Promise.resolve()),
+  setNotificationHandler: jest.fn(),
 }));
 
 jest.mock("expo-splash-screen", () => ({

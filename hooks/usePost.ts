@@ -6,11 +6,18 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Read and refresh a single post from Redux and Lotide.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Select cached post data
+        - Fetch missing posts
+        - Support explicit reload attempts
+
+    This file intentionally does NOT contain:
+
+        - feed pagination
+        - comment loading
 */
 
 import { useEffect } from "react";

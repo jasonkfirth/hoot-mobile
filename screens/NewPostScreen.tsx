@@ -6,17 +6,23 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Compose and submit a new Lotide post.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Choose a target community
+        - Collect title, URL, and markdown body
+        - Store and navigate to the created post
+
+    This file intentionally does NOT contain:
+
+        - community browsing tabs
+        - comment composition
 */
 
 import React, { useEffect, useState } from "react";
 import {
   Alert,
-  Button,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -26,6 +32,7 @@ import {
   TouchableWithoutFeedback,
 } from "react-native";
 import { View, Text, TextInput as TextInputThemed } from "../components/Themed";
+import AppButton from "../components/AppButton";
 import { RootTabScreenProps } from "../types";
 import * as LotideService from "../services/LotideService";
 import useTheme from "../hooks/useTheme";
@@ -36,6 +43,7 @@ import { useLotideCtx } from "../hooks/useLotideCtx";
 import { useDispatch } from "react-redux";
 import { setPost } from "../slices/postSlice";
 import { getErrorMessage } from "../utils/error";
+import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
 export default function NewPostScreen({
   navigation,
@@ -77,12 +85,11 @@ export default function NewPostScreen({
       href: link || undefined,
       content_markdown: content || " ",
     })
-      .then(data => {
-        LotideService.getPost(ctx, data.id).then(post => {
-          reset();
-          dispatch(setPost({ post }));
-          navigation.navigate("Post", { postId: post.id });
-        });
+      .then(data => LotideService.getPost(ctx, data.id))
+      .then(post => {
+        reset();
+        dispatch(setPost({ post }));
+        navigation.navigate("Post", { postId: post.id });
       })
       .catch(e => Alert.alert("Could not submit post", getErrorMessage(e)));
   }
@@ -104,6 +111,7 @@ export default function NewPostScreen({
             accessibilityLabel="Select community"
             accessibilityRole="button"
             onPress={() => setCommunity(null)}
+            style={styles.communitySelector}
           >
             {community ? (
               <ActorDisplayComponent
@@ -153,11 +161,12 @@ export default function NewPostScreen({
             </Text>
           )}
           {!!community && title.length >= 4 && (
-            <Button
+            <AppButton
               onPress={submit}
               title="Submit"
               color={theme.tint}
               accessibilityLabel="Submit new post"
+              fullWidth
             />
           )}
         </View>
@@ -188,9 +197,14 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   input: {
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingVertical: 10,
     width: "100%",
     borderRadius: 8,
+  },
+  communitySelector: {
+    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+    justifyContent: "center",
   },
   item: {
     paddingHorizontal: 20,

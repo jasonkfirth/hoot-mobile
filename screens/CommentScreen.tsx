@@ -6,22 +6,30 @@
 
     Purpose:
 
-        System file for Hoot Mobile.
+        Compose a reply to a post or comment.
 
     Responsibilities:
 
-        • Part of the Hoot Mobile ecosystem
+        - Display the target content context
+        - Submit comment markdown
+        - Navigate back after posting
+
+    This file intentionally does NOT contain:
+
+        - comment tree rendering
+        - post feed loading
 */
 
 import React, { useRef, useState } from "react";
 import {
-  Button,
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
 } from "react-native";
+import AppButton from "../components/AppButton";
 import { Text, TextInput } from "../components/Themed";
 import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
@@ -29,6 +37,7 @@ import * as LotideService from "../services/LotideService";
 import ContentDisplay from "../components/ContentDisplay";
 import { ScrollView } from "react-native-gesture-handler";
 import { useLotideCtx } from "../hooks/useLotideCtx";
+import { getErrorMessage } from "../utils/error";
 
 export default function CommentScreen({
   navigation,
@@ -45,12 +54,18 @@ export default function CommentScreen({
 
   function submit() {
     if (!ctx?.login) return;
+    const onFailure = (error: unknown) => {
+      Alert.alert("Could not submit comment", getErrorMessage(error));
+    };
+
     if (type === "post") {
-      LotideService.commentOnPost(ctx, id, text).then(() => navigation.pop());
+      LotideService.commentOnPost(ctx, id, text)
+        .then(() => navigation.pop())
+        .catch(onFailure);
     } else {
-      LotideService.commentOnComment(ctx, id, text).then(() =>
-        navigation.pop(),
-      );
+      LotideService.commentOnComment(ctx, id, text)
+        .then(() => navigation.pop())
+        .catch(onFailure);
     }
   }
 
@@ -81,7 +96,7 @@ export default function CommentScreen({
             onChangeText={setText}
             onFocus={scrollToBottom}
           />
-          <Button title="Submit" color={theme.tint} onPress={submit} />
+          <AppButton title="Submit" color={theme.tint} onPress={submit} fullWidth />
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
