@@ -44,6 +44,8 @@ const STATE_KEY = "@lotide_notification_poll_state";
 const POLL_DIAGNOSTICS_KEY = "@lotide_notification_poll_diagnostics";
 const MAX_TRACKED_NOTIFICATION_IDS = 250;
 const MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL = 5;
+const NOTIFICATION_TITLE_MAX_LENGTH = 80;
+const NOTIFICATION_BODY_MAX_LENGTH = 180;
 
 /*
     Android preserves a channel's user-facing importance and sound after the
@@ -93,6 +95,13 @@ export type NotificationPollTaskRegistrationResult =
 
 type NotificationPollTaskRegistrationOptions = {
   requireAvailable?: boolean;
+};
+
+type NotificationTextSource = {
+  content_text?: string | null;
+  content_markdown?: string | null;
+  content_html?: string | null;
+  sensitive?: boolean;
 };
 
 export type NotificationDiagnostics = {
@@ -197,47 +206,274 @@ function trackedNotificationIdsForPage(
   return out;
 }
 
+function collapseWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncateNotificationText(value: string, maxLength: number): string {
+  const text = collapseWhitespace(value);
+  if (text.length <= maxLength) return text;
+
+  const suffix = "...";
+  if (maxLength <= suffix.length) {
+    return text.slice(0, maxLength);
+  }
+
+  return `${text.slice(0, maxLength - suffix.length).trimEnd()}${suffix}`;
+}
+
+function decodeHtmlEntity(entity: string): string | undefined {
+  const namedEntities: Record<string, string> = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    lt: "<",
+    nbsp: " ",
+    quot: "\"",
+  };
+  const lower = entity.toLowerCase();
+
+  if (Object.prototype.hasOwnProperty.call(namedEntities, lower)) {
+    return namedEntities[lower];
+  }
+
+  if (/^#[0-9]+$/.test(lower)) {
+    const codePoint = Number.parseInt(lower.slice(1), 10);
+    if (!Number.isFinite(codePoint)) return undefined;
+
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (/^#x[0-9a-f]+$/.test(lower)) {
+    const codePoint = Number.parseInt(lower.slice(2), 16);
+    if (!Number.isFinite(codePoint)) return undefined;
+
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function decodeBasicHtmlEntities(value: string): string {
+  return value.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (match, entity) =>
+    decodeHtmlEntity(entity) ?? match,
+  );
+}
+
+function htmlToNotificationText(value: string): string {
+  return decodeBasicHtmlEntities(
+    value
+      .replace(/<\s*br\s*\/?\s*>/gi, " ")
+      .replace(/<\/\s*(blockquote|div|h[1-6]|li|p)\s*>/gi, " ")
+      .replace(/<[^>]*>/g, " "),
+  );
+}
+
+function markdownToNotificationText(value: string): string {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[*_~>#]/g, "")
+    .replace(/^-+\s*/gm, "");
+}
+
+function firstNotificationText(
+  values: (string | null | undefined)[],
+): string | undefined {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+
+    const text = collapseWhitespace(value);
+    if (text.length > 0) return text;
+  }
+
+  return undefined;
+}
+
+function notificationPreviewText(
+  source: NotificationTextSource | undefined,
+  sensitiveLabel: string,
+): string | undefined {
+  if (!source) return undefined;
+  if (source.sensitive === true) return sensitiveLabel;
+
+  const text = firstNotificationText([
+    source.content_text,
+    typeof source.content_markdown === "string"
+      ? markdownToNotificationText(source.content_markdown)
+      : undefined,
+    typeof source.content_html === "string"
+      ? htmlToNotificationText(source.content_html)
+      : undefined,
+  ]);
+
+  return text
+    ? truncateNotificationText(text, NOTIFICATION_BODY_MAX_LENGTH)
+    : undefined;
+}
+
+function profileDisplayName(profile: Profile | undefined): string {
+  const username = typeof profile?.username === "string"
+    ? collapseWhitespace(profile.username)
+    : "";
+
+  return username.length > 0
+    ? truncateNotificationText(username, NOTIFICATION_TITLE_MAX_LENGTH)
+    : "Someone";
+}
+
+function profileHandle(profile: Profile | undefined): string | undefined {
+  const username = typeof profile?.username === "string"
+    ? collapseWhitespace(profile.username)
+    : "";
+  if (username.length === 0) return undefined;
+
+  const host = typeof profile?.host === "string"
+    ? collapseWhitespace(profile.host)
+    : "";
+
+  return host.length > 0 ? `${username}@${host}` : username;
+}
+
+function notificationPostTitle(
+  notification: ReplyNotification,
+): string | undefined {
+  const title = typeof notification.post?.title === "string"
+    ? collapseWhitespace(notification.post.title)
+    : "";
+
+  return title.length > 0
+    ? truncateNotificationText(title, NOTIFICATION_BODY_MAX_LENGTH)
+    : undefined;
+}
+
+function contextualNotificationBody(
+  context: string | undefined,
+  preview: string | undefined,
+  fallback: string,
+): string {
+  if (context && preview && context !== preview) {
+    return truncateNotificationText(
+      `${context}: ${preview}`,
+      NOTIFICATION_BODY_MAX_LENGTH,
+    );
+  }
+
+  return truncateNotificationText(
+    preview ?? context ?? fallback,
+    NOTIFICATION_BODY_MAX_LENGTH,
+  );
+}
+
 function notificationContent(notification: FullNotification) {
   if (notification.kind === "user_follow") {
-    const actor = notification.actor?.username ?? "Someone";
+    const actor = profileDisplayName(notification.actor);
+    const handle = profileHandle(notification.actor);
+
     return {
-      title: "New Lotide follower",
-      body: `${actor} followed you`,
+      title: truncateNotificationText(
+        `${actor} followed you`,
+        NOTIFICATION_TITLE_MAX_LENGTH,
+      ),
+      body: truncateNotificationText(
+        handle ?? "Open Hoot to view their profile.",
+        NOTIFICATION_BODY_MAX_LENGTH,
+      ),
       sound: "default" as const,
     };
   }
 
   if (notification.kind === "private_message") {
-    const actor = notification.message.author.username || "Someone";
+    const actor = profileDisplayName(notification.message.author);
+    const preview = notificationPreviewText(
+      notification.message,
+      "Sensitive message",
+    );
+
     return {
-      title: "New Lotide message",
-      body: `${actor} sent you a message`,
+      title: truncateNotificationText(
+        `${actor} sent you a message`,
+        NOTIFICATION_TITLE_MAX_LENGTH,
+      ),
+      body: preview ?? "Open Hoot to view the message.",
       sound: "default" as const,
     };
   }
 
   if (notification.notificationType === "post_mention") {
+    const actor = profileDisplayName(notification.post?.author);
+    const title = notificationPostTitle(notification);
+    const preview = notificationPreviewText(
+      notification.post,
+      "Sensitive post",
+    );
+
     return {
-      title: "New Lotide post mention",
-      body: "Open the app to view the post that mentioned you.",
+      title: truncateNotificationText(
+        `${actor} mentioned you in a post`,
+        NOTIFICATION_TITLE_MAX_LENGTH,
+      ),
+      body: contextualNotificationBody(
+        title,
+        preview,
+        "Open Hoot to view the post that mentioned you.",
+      ),
       sound: "default" as const,
     };
   }
 
   if (notification.notificationType === "comment_mention") {
+    const mentionedComment = notification.comment ?? notification.reply;
+    const actor = profileDisplayName(mentionedComment?.author);
+    const title = notificationPostTitle(notification);
+    const preview = notificationPreviewText(
+      mentionedComment,
+      "Sensitive comment",
+    );
+
     return {
-      title: "New Lotide comment mention",
-      body: "Open the app to view the comment that mentioned you.",
+      title: truncateNotificationText(
+        `${actor} mentioned you in a comment`,
+        NOTIFICATION_TITLE_MAX_LENGTH,
+      ),
+      body: contextualNotificationBody(
+        title,
+        preview,
+        "Open Hoot to view the comment that mentioned you.",
+      ),
       sound: "default" as const,
     };
   }
 
   const isComment = notification.origin.type === "comment";
+  const actor = profileDisplayName(notification.reply?.author);
+  const title = notificationPostTitle(notification);
+  const preview = notificationPreviewText(
+    notification.reply,
+    "Sensitive reply",
+  );
+
   return {
-    title: isComment
-      ? "New Lotide comment reply"
-      : "New Lotide post reply",
-    body: "Open the app to view your latest notifications.",
+    title: truncateNotificationText(
+      isComment
+        ? `${actor} replied to your comment`
+        : `${actor} replied to your post`,
+      NOTIFICATION_TITLE_MAX_LENGTH,
+    ),
+    body: contextualNotificationBody(
+      title,
+      preview,
+      "Open Hoot to view your latest notifications.",
+    ),
     sound: "default" as const,
   };
 }

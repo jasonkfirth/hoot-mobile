@@ -112,6 +112,7 @@ function replyNotification(
   postId: PostId,
   commentId: CommentId,
   unseen: boolean,
+  overrides: Partial<ReplyNotification> = {},
 ): ReplyNotification {
   return {
     unseen,
@@ -121,6 +122,7 @@ function replyNotification(
       id: postId,
     },
     postId,
+    ...overrides,
   };
 }
 
@@ -160,7 +162,56 @@ async function storedNotificationIds(
     : [];
 }
 
-function privateMessageNotification(): PrivateMessageNotification {
+function profile(
+  id: UserId,
+  username: string,
+  host = "remote.example",
+): Profile {
+  return {
+    id,
+    username,
+    host,
+    local: false,
+  };
+}
+
+function postSnapshot(
+  id: PostId,
+  title: string,
+  overrides: Partial<Post> = {},
+): Post {
+  return {
+    id,
+    title,
+    author: profile(100 + id, "post_author"),
+    created: "2026-06-18T12:00:00Z",
+    replies_count_total: 0,
+    score: 0,
+    sensitive: false,
+    ...overrides,
+  };
+}
+
+function commentSnapshot(
+  id: CommentId,
+  username: string,
+  contentText: string,
+  overrides: Partial<Comment> = {},
+): Comment {
+  return {
+    id,
+    author: profile(200 + id, username),
+    created: "2026-06-18T12:00:00Z",
+    score: 0,
+    content_text: contentText,
+    sensitive: false,
+    ...overrides,
+  };
+}
+
+function privateMessageNotification(
+  overrides: Partial<PrivateMessage> = {},
+): PrivateMessageNotification {
   return {
     unseen: true,
     kind: "private_message",
@@ -185,6 +236,7 @@ function privateMessageNotification(): PrivateMessageNotification {
       content_html: "<p>hello</p>",
       in_reply_to: null,
       sensitive: false,
+      ...overrides,
     },
   };
 }
@@ -354,6 +406,95 @@ describe("LotideNotificationPoller", () => {
     );
   });
 
+  test("formats reply notifications with the actor, post title, and preview", async () => {
+    mockGetNotifications.mockResolvedValue([]);
+    await setNotificationEnabled(true, ctx);
+
+    mockScheduleNotification.mockClear();
+    mockGetNotifications.mockResolvedValue([
+      replyNotification(11, 21, false, {
+        notificationType: "post_reply",
+        post: postSnapshot(11, "Release notes"),
+        reply: commentSnapshot(21, "alex", "This fixed the Android alert."),
+      }),
+    ]);
+
+    const count = await pollNotificationsNow(ctx);
+
+    expect(count).toBe(1);
+    expect(mockScheduleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          title: "alex replied to your post",
+          body: "Release notes: This fixed the Android alert.",
+        }),
+      }),
+    );
+  });
+
+  test("formats comment mentions with the mentioned comment preview", async () => {
+    const comment = commentSnapshot(
+      22,
+      "mira",
+      "@sj_zero this is the bit to look at.",
+    );
+
+    mockGetNotifications.mockResolvedValue([]);
+    await setNotificationEnabled(true, ctx);
+
+    mockScheduleNotification.mockClear();
+    mockGetNotifications.mockResolvedValue([
+      replyNotification(12, 22, false, {
+        notificationType: "comment_mention",
+        origin: {
+          type: "comment",
+          id: 22,
+        },
+        post: postSnapshot(12, "Mention thread"),
+        comment,
+        reply: comment,
+      }),
+    ]);
+
+    const count = await pollNotificationsNow(ctx);
+
+    expect(count).toBe(1);
+    expect(mockScheduleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          title: "mira mentioned you in a comment",
+          body: "Mention thread: @sj_zero this is the bit to look at.",
+        }),
+      }),
+    );
+  });
+
+  test("does not expose sensitive private message text in notifications", async () => {
+    mockGetNotifications.mockResolvedValue([]);
+    await setNotificationEnabled(true, ctx);
+
+    mockScheduleNotification.mockClear();
+    mockGetNotifications.mockResolvedValue([
+      privateMessageNotification({
+        content_text: "keep this off the lock screen",
+        content_html: "<p>keep this off the lock screen</p>",
+        sensitive: true,
+      }),
+    ]);
+
+    const count = await pollNotificationsNow(ctx);
+
+    expect(count).toBe(1);
+    expect(mockScheduleNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          title: "remote sent you a message",
+          body: "Sensitive message",
+        }),
+      }),
+    );
+  });
+
   test("keeps the latest fetched notification page before older tracked ids", async () => {
     const olderIds = replyNotifications(20, 10).map(item =>
       replyFingerprint(item.postId, item.commentId),
@@ -413,7 +554,8 @@ describe("LotideNotificationPoller", () => {
     expect(mockScheduleNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.objectContaining({
-          title: "New Lotide message",
+          title: "remote sent you a message",
+          body: "hello",
           data: expect.objectContaining({
             lotideKind: "private_message",
             lotideMessageId: 33,
