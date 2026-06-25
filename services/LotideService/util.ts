@@ -14,6 +14,7 @@
         • Define core request methods and types
         • Implement the base API request function (lotideRequest)
         • Handle authentication header generation
+        • Bound stalled requests so screens can recover
         • Provide error logging for API interactions
 
     This file intentionally does NOT contain:
@@ -21,6 +22,8 @@
         • Specific API endpoint implementations (see Post.ts, User.ts, etc.)
         • Business logic or state management
 */
+
+import { logError } from "../../utils/debugLog";
 
 /* ------------------------------------------------------------------------- */
 /* Types and Interfaces                                                      */
@@ -37,6 +40,21 @@ export type LotideError = Error & {
 
 export type JsonResponse = Response & {
   json(): Promise<unknown>;
+};
+
+/*
+    Mobile radios and federated servers can leave a fetch promise pending for a
+    very long time. Thirty seconds keeps slow real-world requests possible while
+    still letting screens leave their loading state and expose retry UI.
+*/
+export const LOTIDE_REQUEST_TIMEOUT_MS = 30_000;
+
+type RequestTimeout = {
+  error: LotideError;
+  promise: Promise<never>;
+  signal?: AbortSignal;
+  clear: () => void;
+  didTimeout: () => boolean;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -72,7 +90,13 @@ export function isAuthenticationError(error: unknown): boolean {
 
     Error Handling:
         If the response is not OK, the function throws the response text.
-        Errors are logged to the console with the request details and context.
+        Errors are routed through the central diagnostic logger with request
+        details that are useful in device logs.
+
+    Timeout:
+        Fetch does not guarantee that a stalled request will ever reject. Hoot
+        therefore races each request against a timer and uses AbortController
+        when the platform provides it so the underlying request can be stopped.
 */
 export async function lotideRequest(
   ctx: LotideContext,
@@ -84,15 +108,23 @@ export async function lotideRequest(
   if (!ctx.apiUrl) throw new Error("No API url");
   if (!noLogin && !ctx.login?.token) throw new Error("Not logged in");
 
+  const url = buildLotideEndpointUrl(ctx.apiUrl, path);
+  const requestTimeout = createRequestTimeout(url, method);
+  const requestOptions: RequestInit = {
+    method,
+    headers: buildHeaders(ctx),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  };
+
+  if (requestTimeout.signal) {
+    requestOptions.signal = requestTimeout.signal;
+  }
+
   /*
      Fetch API interaction
      The Lotide API expects JSON bodies and returns JSON responses.
   */
-  return fetch(`${ctx.apiUrl}/${path}`, {
-    method,
-    headers: buildHeaders(ctx),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  const requestPromise = fetch(url, requestOptions)
     .then(async res => {
       if (res.ok) {
         return res;
@@ -101,14 +133,24 @@ export async function lotideRequest(
         const err = new Error(errorBody || "Request failed") as LotideError;
         err.status = res.status;
         err.body = errorBody;
-        err.path = `${ctx.apiUrl}/${path}`;
+        err.path = url;
         err.method = method;
         throw err;
       }
-    })
+    });
+
+  return Promise.race([
+    requestPromise,
+    requestTimeout.promise,
+  ])
     .catch(e => {
-      console.error(`Lotide Service Error: ${method} ${ctx.apiUrl}/${path}\n${e}`);
-      throw e;
+      const error = requestTimeout.didTimeout() ? requestTimeout.error : e;
+
+      logError(`Lotide service request failed: ${method} ${url}`, error);
+      throw error;
+    })
+    .finally(() => {
+      requestTimeout.clear();
     });
 }
 
@@ -126,6 +168,55 @@ export function buildHeaders(ctx: LotideContext): HeadersInit | undefined {
         "Content-Type": "application/json",
       }
     : undefined;
+}
+
+export function normalizeLotideApiUrl(apiUrl: string): string {
+  return apiUrl.trim().replace(/\/+$/, "");
+}
+
+function buildLotideEndpointUrl(apiUrl: string, path: string): string {
+  const normalizedApiUrl = normalizeLotideApiUrl(apiUrl);
+  const normalizedPath = path.replace(/^\/+/, "");
+
+  return `${normalizedApiUrl}/${normalizedPath}`;
+}
+
+function createRequestTimeout(
+  url: string,
+  method: RequestMethod,
+): RequestTimeout {
+  const controller = typeof AbortController !== "undefined"
+    ? new AbortController()
+    : undefined;
+  let didTimeout = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const error = new Error(
+    "The Lotide server did not respond within 30 seconds.",
+  ) as LotideError;
+
+  error.path = url;
+  error.method = method;
+
+  const promise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      didTimeout = true;
+      controller?.abort();
+      reject(error);
+    }, LOTIDE_REQUEST_TIMEOUT_MS);
+  });
+
+  return {
+    error,
+    promise,
+    signal: controller?.signal,
+    clear: () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+    didTimeout: () => didTimeout,
+  };
 }
 
 export async function readJson(response: JsonResponse): Promise<unknown> {

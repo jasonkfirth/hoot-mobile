@@ -23,7 +23,13 @@
 */
 
 import Icon from "@expo/vector-icons/Ionicons";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Alert,
   FlatList,
@@ -78,6 +84,7 @@ export default function SourceListScreen({
   const [searchText, setSearchText] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
   const [reloadId, setReloadId] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [state, setState] = useState<SourceListState>(() =>
     emptySourceListState(),
   );
@@ -154,7 +161,10 @@ export default function SourceListScreen({
         }));
       })
       .finally(() => {
-        if (isActive) isRequestingRef.current = false;
+        if (isActive) {
+          isRequestingRef.current = false;
+          setIsRefreshing(false);
+        }
       });
 
     return () => {
@@ -199,7 +209,14 @@ export default function SourceListScreen({
   }
 
   function refresh() {
-    setState(emptySourceListState());
+    setIsRefreshing(true);
+    setState(current => ({
+      ...current,
+      pageNumber: 1,
+      nextPage: null,
+      loadError: "",
+      hasLoaded: current.hasLoaded || current.items.length > 0,
+    }));
     setReloadId(x => x + 1);
   }
 
@@ -229,11 +246,12 @@ export default function SourceListScreen({
 
   return (
     <FlatList
+      testID="source-list"
       style={[styles.root, { backgroundColor: theme.background }]}
       data={state.items}
       keyExtractor={item => String(item.id)}
       renderItem={renderItem}
-      refreshing={false}
+      refreshing={isRefreshing}
       onRefresh={refresh}
       onEndReachedThreshold={1.2}
       onEndReached={loadNextPage}
@@ -281,6 +299,14 @@ export default function SourceListScreen({
           <Text style={[styles.countText, { color: theme.secondaryText }]}>
             {sourceCountText(effectiveScope, state.totalCount, !!activeSearch)}
           </Text>
+          {state.items.length > 0 && state.loadError ? (
+            <RetryState
+              compact
+              message={state.loadError}
+              onRetry={refresh}
+              style={styles.inlineError}
+            />
+          ) : null}
         </View>
       }
       ListEmptyComponent={
@@ -309,34 +335,81 @@ function SourceRow({
 }) {
   const ctx = useLotideCtx();
   const theme = useTheme();
+  const [isFollowActionPending, setIsFollowActionPending] = useState(false);
+  const isMountedRef = useRef(true);
+  const followActionPendingRef = useRef(false);
   const isFollowing = !!item.your_follow;
   const followLabel = item.your_follow?.accepted ? "Unfollow" : "Cancel";
+  const pendingFollowLabel = isFollowing
+    ? item.your_follow?.accepted
+      ? "Unfollowing..."
+      : "Canceling..."
+    : "Following...";
 
-  function followOrUnfollow() {
-    if (!ctx?.login) return;
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      followActionPendingRef.current = false;
+    };
+  }, []);
 
-    if (isFollowing) {
-      LotideService.unfollowCollectionTarget(ctx, item.id)
-        .then(onChanged)
-        .catch(() => {
-          Alert.alert("Failed to unfollow feed");
-        });
-      return;
+  function alertIfMounted(title: string, message?: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
+  }
+
+  function startFollowAction() {
+    if (followActionPendingRef.current) return false;
+
+    followActionPendingRef.current = true;
+    setIsFollowActionPending(true);
+    return true;
+  }
+
+  function finishFollowAction() {
+    followActionPendingRef.current = false;
+
+    if (isMountedRef.current) {
+      setIsFollowActionPending(false);
     }
+  }
 
-    LotideService.followCollectionTarget(ctx, item.id)
-      .then(result => {
-        if (result.accepted === false) {
-          Alert.alert(
-            "Follow request sent",
-            "The remote feed has not accepted the follow yet.",
-          );
+  async function followOrUnfollow() {
+    if (!ctx?.login) return;
+    if (!startFollowAction()) return;
+
+    try {
+      if (isFollowing) {
+        await LotideService.unfollowCollectionTarget(ctx, item.id);
+
+        if (isMountedRef.current) {
+          onChanged();
         }
+        return;
+      }
+
+      const result = await LotideService.followCollectionTarget(ctx, item.id);
+
+      if (!isMountedRef.current) return;
+
+      if (result.accepted === false) {
+        alertIfMounted(
+          "Follow request sent",
+          "The remote feed has not accepted the follow yet.",
+        );
+      }
+
+      if (isMountedRef.current) {
         onChanged();
-      })
-      .catch(() => {
-        Alert.alert("Failed to follow feed");
-      });
+      }
+    } catch {
+      alertIfMounted(
+        isFollowing ? "Failed to unfollow feed" : "Failed to follow feed",
+      );
+    } finally {
+      finishFollowAction();
+    }
   }
 
   return (
@@ -382,14 +455,19 @@ function SourceRow({
             isFollowing ? `Unfollow ${item.name}` : `Follow ${item.name}`
           }
           accessibilityRole="button"
+          accessibilityState={{ disabled: isFollowActionPending }}
+          disabled={isFollowActionPending}
           hitSlop={TOUCH_TARGET_HIT_SLOP}
-          onPress={followOrUnfollow}
+          onPress={() => {
+            void followOrUnfollow();
+          }}
           style={[
             styles.actionButton,
             {
               backgroundColor: isFollowing
                 ? theme.secondaryBackground
                 : theme.tint,
+              opacity: isFollowActionPending ? 0.72 : 1,
             },
           ]}
         >
@@ -399,7 +477,11 @@ function SourceRow({
               fontWeight: "600",
             }}
           >
-            {isFollowing ? followLabel : "Follow"}
+            {isFollowActionPending
+              ? pendingFollowLabel
+              : isFollowing
+                ? followLabel
+                : "Follow"}
           </Text>
         </Pressable>
       )}
@@ -671,6 +753,9 @@ const styles = StyleSheet.create({
   },
   empty: {
     padding: 24,
+  },
+  inlineError: {
+    marginTop: 14,
   },
 });
 

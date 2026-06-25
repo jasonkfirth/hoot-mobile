@@ -22,14 +22,18 @@
 */
 
 import * as React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { Alert } from "react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider } from "react-redux";
 import configureStoreMock from "redux-mock-store";
 
-import HostList from "../HostList";
+import HostList, { updateKnownHostInstanceInfo } from "../HostList";
 
 const mockGetStore = jest.fn();
 const mockGetInstanceInfo = jest.fn();
+const mockDispatch = jest.fn();
+const mockLotideContextStore = jest.fn();
+const mockLotideContextKVStore = jest.fn();
 
 jest.mock("../../hooks/useTheme", () => ({
   __esModule: true,
@@ -38,20 +42,26 @@ jest.mock("../../hooks/useTheme", () => ({
     secondaryText: "#333",
     secondaryBackground: "#ddd",
     tertiaryBackground: "#eee",
+    tint: "#f5a524",
   }),
 }));
 
 jest.mock("react-redux", () => ({
   ...jest.requireActual("react-redux"),
-  useDispatch: () => jest.fn(),
+  useDispatch: () => mockDispatch,
 }));
 
 jest.mock("../../services/StorageService", () => ({
   __esModule: true,
   ...jest.requireActual("../../services/StorageService"),
+  lotideContext: {
+    ...jest.requireActual("../../services/StorageService").lotideContext,
+    store: (...args: unknown[]) => mockLotideContextStore(...args),
+  },
   lotideContextKV: {
     ...jest.requireActual("../../services/StorageService").lotideContextKV,
     getStore: (...args: unknown[]) => mockGetStore(...args),
+    store: (...args: unknown[]) => mockLotideContextKVStore(...args),
   },
 }));
 
@@ -67,14 +77,32 @@ function renderWithStore(ui: React.ReactElement, ctx: LotideContext = {}) {
   return render(<Provider store={mockStore({ lotide: { ctx } })}>{ui}</Provider>);
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 describe("HostList", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(Alert, "alert").mockImplementation(() => {});
     mockGetStore.mockResolvedValue({});
+    mockLotideContextStore.mockResolvedValue(undefined);
+    mockLotideContextKVStore.mockResolvedValue(undefined);
     mockGetInstanceInfo.mockResolvedValue({
       software: { name: "Hoot", version: "0.19.0" },
       apiVersion: 19,
     });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   test("renders the seeded known hosts and existing profiles", async () => {
@@ -102,6 +130,178 @@ describe("HostList", () => {
 
     expect(screen.getByText("alice")).toBeTruthy();
     expect(screen.getAllByText("lotide.fbxl.net").length).toBeGreaterThan(0);
+  });
+
+  test("persists a selected saved profile before activating it", async () => {
+    const savedContext = {
+      login: {
+        token: "token-1",
+        user: {
+          id: 1,
+          username: "alice",
+          host: "lotide.fbxl.net",
+          local: true,
+        },
+      },
+      apiUrl: "https://lotide.fbxl.net/api/unstable",
+    };
+    mockGetStore.mockResolvedValue({
+      "alice@https://lotide.fbxl.net/api/unstable": savedContext,
+    });
+
+    const screen = await renderWithStore(<HostList onSelect={jest.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("alice")).toBeTruthy();
+    });
+
+    await fireEvent.press(
+      screen.getByRole("button", {
+        name: "Select profile alice@lotide.fbxl.net",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockLotideContextKVStore).toHaveBeenCalledWith(savedContext);
+      expect(mockLotideContextStore).toHaveBeenCalledWith(savedContext);
+      expect(mockDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "lotide/setCtx",
+          payload: savedContext,
+        }),
+      );
+    });
+  });
+
+  test("ignores duplicate saved profile activation while storage is pending", async () => {
+    const savedContext = {
+      login: {
+        token: "token-1",
+        user: {
+          id: 1,
+          username: "alice",
+          host: "lotide.fbxl.net",
+          local: true,
+        },
+      },
+      apiUrl: "https://lotide.fbxl.net/api/unstable",
+    };
+    const kvStore = createDeferred<void>();
+    const activeStore = createDeferred<void>();
+
+    mockGetStore.mockResolvedValue({
+      "alice@https://lotide.fbxl.net/api/unstable": savedContext,
+    });
+    mockLotideContextKVStore.mockReturnValue(kvStore.promise);
+    mockLotideContextStore.mockReturnValue(activeStore.promise);
+
+    const screen = await renderWithStore(<HostList onSelect={jest.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("alice")).toBeTruthy();
+      expect(screen.getAllByText("Hoot 0.19.0")).toHaveLength(3);
+    });
+
+    fireEvent.press(
+      screen.getByRole("button", {
+        name: "Select profile alice@lotide.fbxl.net",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockLotideContextKVStore).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByRole("button", {
+          name: "Select profile alice@lotide.fbxl.net",
+        }).props.accessibilityState,
+      ).toEqual({ busy: true, disabled: true });
+    });
+
+    fireEvent.press(
+      screen.getByRole("button", {
+        name: "Select profile alice@lotide.fbxl.net",
+      }),
+    );
+    expect(mockLotideContextKVStore).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      kvStore.resolve(undefined);
+      await kvStore.promise;
+    });
+
+    await waitFor(() => {
+      expect(mockLotideContextStore).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      activeStore.resolve(undefined);
+      await activeStore.promise;
+    });
+
+    await waitFor(() => {
+      expect(mockDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "lotide/setCtx",
+          payload: savedContext,
+        }),
+      );
+      expect(
+        screen.getByRole("button", {
+          name: "Select profile alice@lotide.fbxl.net",
+        }).props.accessibilityState,
+      ).toEqual({ busy: false, disabled: false });
+    });
+  });
+
+  test("does not alert when saved profile activation fails after unmount", async () => {
+    const savedContext = {
+      login: {
+        token: "token-1",
+        user: {
+          id: 1,
+          username: "alice",
+          host: "lotide.fbxl.net",
+          local: true,
+        },
+      },
+      apiUrl: "https://lotide.fbxl.net/api/unstable",
+    };
+    const kvStore = createDeferred<void>();
+
+    mockGetStore.mockResolvedValue({
+      "alice@https://lotide.fbxl.net/api/unstable": savedContext,
+    });
+    mockLotideContextKVStore.mockReturnValue(kvStore.promise);
+
+    const screen = await renderWithStore(<HostList onSelect={jest.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("alice")).toBeTruthy();
+    });
+
+    fireEvent.press(
+      screen.getByRole("button", {
+        name: "Select profile alice@lotide.fbxl.net",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockLotideContextKVStore).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByRole("button", {
+          name: "Select profile alice@lotide.fbxl.net",
+        }).props.accessibilityState,
+      ).toEqual({ busy: true, disabled: true });
+    });
+
+    screen.unmount();
+
+    kvStore.reject(new Error("storage failed"));
+    await kvStore.promise.catch(() => undefined);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 
   test("filters hosts and selects the chosen host", async () => {
@@ -169,7 +369,38 @@ describe("HostList", () => {
     expect(onSelect).toHaveBeenCalledWith("lotide.fbxl.net", "FBXL Lotide");
   });
 
-  test("submits a typed custom host in lowercase", async () => {
+  test("updates known host probe results by domain instead of list index", () => {
+    const narwhalInfo: InstanceInfo = {
+      software: { name: "Lotide", version: "0.18.1" },
+      site_name: "Narwhal City",
+      apiVersion: 18,
+    };
+    const hosts = [
+      {
+        name: "FBXL Lotide",
+        domain: "lotide.fbxl.net",
+      },
+      {
+        name: "Narwhal City",
+        domain: "narwhal.city",
+      },
+    ];
+
+    const updatedHosts = updateKnownHostInstanceInfo(
+      hosts,
+      "narwhal.city",
+      narwhalInfo,
+    );
+
+    expect(updatedHosts[0]).toEqual(hosts[0]);
+    expect(updatedHosts[1]).toEqual({
+      name: "Narwhal City",
+      domain: "narwhal.city",
+      instanceInfo: narwhalInfo,
+    });
+  });
+
+  test("submits a typed custom host from the visible continue action", async () => {
     const onSelect = jest.fn();
     const screen = await renderWithStore(<HostList onSelect={onSelect} />);
     const input = screen.getByPlaceholderText("Host domain");
@@ -178,10 +409,26 @@ describe("HostList", () => {
       expect(screen.getAllByText("Hoot 0.19.0")).toHaveLength(3);
     });
 
-    await fireEvent.changeText(input, "LoTiDe.FBXL.NET");
-    await fireEvent(input, "submitEditing");
+    await fireEvent.changeText(input, "https://LoTiDe.FBXL.NET/api/unstable");
+    await fireEvent.press(screen.getByRole("button", { name: "Continue" }));
 
     expect(onSelect).toHaveBeenCalledWith("lotide.fbxl.net");
+  });
+
+  test("does not submit an empty custom host", async () => {
+    const onSelect = jest.fn();
+    const screen = await renderWithStore(<HostList onSelect={onSelect} />);
+
+    await fireEvent(
+      screen.getByPlaceholderText("Host domain"),
+      "submitEditing",
+    );
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Enter a host",
+      "Type a Lotide host domain before continuing.",
+    );
   });
 });
 

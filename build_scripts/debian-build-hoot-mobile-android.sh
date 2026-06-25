@@ -7,13 +7,12 @@
 #
 # Purpose:
 #
-#     Automates the installation of system dependencies and the execution
-#     of build commands to produce an Android APK for Hoot Mobile on
-#     Debian-based systems.
+#     Automates the local Android SDK setup and build commands needed to
+#     produce an Android APK for Hoot Mobile on Debian-based systems.
 #
 # Responsibilities:
 #
-#     • Install required system packages (Node.js, JDK, Android SDK tools)
+#     • Optionally install required system packages when explicitly requested
 #     • Configure the Android environment variables
 #     • Install project-specific dependencies via npm
 #     • Execute Expo prebuild to generate native Android project files
@@ -36,6 +35,7 @@ ANDROID_TOOLS_ZIP="commandlinetools-linux-11076708_latest.zip"
 NEEDED_PACKAGES="curl git unzip zip openjdk-17-jdk"
 EXPO_CLI="$PROJECT_ROOT/node_modules/.bin/expo"
 BUILD_NODE_ENV="${HOOT_MOBILE_NODE_ENV:-production}"
+INSTALL_SYSTEM_DEPS="${HOOT_MOBILE_INSTALL_SYSTEM_DEPS:-0}"
 JAVA_HOME_CANDIDATES=(
   "/usr/lib/jvm/java-17-openjdk-amd64"
   "/usr/lib/jvm/java-1.17.0-openjdk-amd64"
@@ -50,6 +50,14 @@ log() {
 
 command_exists() {
   command -v "$1" &>/dev/null
+}
+
+can_run_root_cmd() {
+  if [ "$(id -u)" -eq 0 ]; then
+    return 0
+  fi
+
+  command_exists sudo && sudo -n true &>/dev/null
 }
 
 run_root_cmd() {
@@ -67,6 +75,22 @@ run_root_cmd() {
 
   log "Skipping root command: $*"
   log "If you're running without sudo access, install these packages manually first: $NEEDED_PACKAGES"
+}
+
+maybe_install_system_packages() {
+  if ! command_exists apt-get; then
+    return 0
+  fi
+
+  if [ "$INSTALL_SYSTEM_DEPS" != "1" ]; then
+    log "Skipping system package installation."
+    log "Set HOOT_MOBILE_INSTALL_SYSTEM_DEPS=1 to run apt-get for: $NEEDED_PACKAGES"
+    return 0
+  fi
+
+  log "Updating system and installing baseline dependencies..."
+  run_root_cmd apt-get update
+  run_root_cmd apt-get install -y $NEEDED_PACKAGES
 }
 
 warn_if_node_modules_is_not_writable() {
@@ -98,7 +122,7 @@ run_npm_install() {
     fi
   fi
 
-  if [ "${HOOT_MOBILE_NPM_FALLBACK_INSTALL:-1}" != "1" ]; then
+  if [ "${HOOT_MOBILE_NPM_FALLBACK_INSTALL:-0}" != "1" ]; then
     log "npm ci failed and fallback is disabled. Set HOOT_MOBILE_NPM_FALLBACK_INSTALL=1 to retry with npm install."
     return 1
   fi
@@ -124,6 +148,59 @@ clear_react_bundle_cache() {
     "$bundle_dir" \
     "$sourcemap_dir" \
     "$legacy_bundle"
+}
+
+normalize_generated_android_xml() {
+  local file=""
+
+  if [ ! -d "$PROJECT_ROOT/android/app/src/main" ]; then
+    return
+  fi
+
+  while IFS= read -r -d '' file; do
+    if [ -s "$file" ] && [ -n "$(tail -c 1 "$file")" ]; then
+      printf "\n" >> "$file"
+    fi
+  done < <(find "$PROJECT_ROOT/android/app/src/main" -type f -name '*.xml' -print0)
+}
+
+normalize_generated_android_gradle() {
+  local app_gradle="$PROJECT_ROOT/android/app/build.gradle"
+  local root_gradle="$PROJECT_ROOT/android/build.gradle"
+
+  if [ -f "$root_gradle" ]; then
+    perl -0pi -e "s/maven \\{ url '([^']+)' \\}/maven { url = uri('\\1') }/g" "$root_gradle"
+  fi
+
+  if [ ! -f "$app_gradle" ]; then
+    return
+  fi
+
+  # Expo prebuild still emits Groovy property shorthand that Gradle 9
+  # deprecates and Gradle 10 will reject. Keep the generated project buildable
+  # on newer Gradle without forking Expo's native project templates.
+  perl -0pi -e '
+    s/^(\s*)ndkVersion\s+(?!=)(.+)$/${1}ndkVersion = $2/mg;
+    s/^(\s*)buildToolsVersion\s+(?!=)(.+)$/${1}buildToolsVersion = $2/mg;
+    s/^(\s*)compileSdk\s+(?!=)(.+)$/${1}compileSdk = $2/mg;
+    s/^(\s*)namespace\s+(?!=)(.+)$/${1}namespace = $2/mg;
+    s/^(\s*)applicationId\s+(?!=)(.+)$/${1}applicationId = $2/mg;
+    s/^(\s*)minSdkVersion\s+(?!=)(.+)$/${1}minSdkVersion = $2/mg;
+    s/^(\s*)targetSdkVersion\s+(?!=)(.+)$/${1}targetSdkVersion = $2/mg;
+    s/^(\s*)versionCode\s+(?!=)(.+)$/${1}versionCode = $2/mg;
+    s/^(\s*)versionName\s+(?!=)(.+)$/${1}versionName = $2/mg;
+    s/^(\s*)storeFile\s+(?!=)(.+)$/${1}storeFile = $2/mg;
+    s/^(\s*)storePassword\s+(?!=)(.+)$/${1}storePassword = $2/mg;
+    s/^(\s*)keyAlias\s+(?!=)(.+)$/${1}keyAlias = $2/mg;
+    s/^(\s*)keyPassword\s+(?!=)(.+)$/${1}keyPassword = $2/mg;
+    s/^(\s*)signingConfig\s+(?!=)(.+)$/${1}signingConfig = $2/mg;
+    s/^(\s*)shrinkResources\s+(?!=)(.+)$/${1}shrinkResources = $2/mg;
+    s/^(\s*)minifyEnabled\s+(?!=)(.+)$/${1}minifyEnabled = $2/mg;
+    s/^(\s*)crunchPngs\s+(?!=)(.+)$/${1}crunchPngs = $2/mg;
+    s/^(\s*)useLegacyPackaging\s+(?!=)(.+)$/${1}useLegacyPackaging = $2/mg;
+    s/^(\s*)ignoreAssetsPattern\s+(?!=)(.+)$/${1}ignoreAssetsPattern = $2/mg;
+    s/^(\s*)implementation\s+jscFlavor\s*$/${1}implementation(jscFlavor)/mg;
+  ' "$app_gradle"
 }
 
 java_candidate_has_javac17() {
@@ -162,20 +239,16 @@ cd "$PROJECT_ROOT"
 
 configure_node_env
 
-if command_exists apt-get; then
-  log "Updating system and installing baseline dependencies..."
-  run_root_cmd apt-get update
-  run_root_cmd apt-get install -y $NEEDED_PACKAGES
-fi
+maybe_install_system_packages
 
 # Install Node.js (v20 LTS recommended for SDK 56)
 if ! command_exists node; then
-  log "Installing Node.js..."
-  if [ "$(id -u)" -eq 0 ] || command_exists sudo && sudo -n true &>/dev/null; then
+  if [ "$INSTALL_SYSTEM_DEPS" = "1" ] && can_run_root_cmd; then
+    log "Installing Node.js..."
     curl -fsSL https://deb.nodesource.com/setup_20.x | if command_exists sudo; then sudo -E bash -; else bash -; fi
     run_root_cmd apt-get install -y nodejs
   else
-    log "Node.js not found. Install Node.js 20.x manually before running this script."
+    log "Node.js not found. Install Node.js 20.x manually or rerun with HOOT_MOBILE_INSTALL_SYSTEM_DEPS=1."
     exit 1
   fi
 fi
@@ -197,8 +270,9 @@ if [ -n "${JAVA_HOME:-}" ] && java_candidate_has_javac17 "$JAVA_HOME"; then
   export PATH="$JAVA_HOME/bin:$PATH"
   log "Using JAVA_HOME=$JAVA_HOME"
 else
-  log "No Java 17 compiler found. Gradle builds may fail."
-  log "Install openjdk-17-jdk and set JAVA_HOME accordingly."
+  log "No Java 17 compiler found."
+  log "Install openjdk-17-jdk and set JAVA_HOME, or rerun with HOOT_MOBILE_INSTALL_SYSTEM_DEPS=1."
+  exit 1
 fi
 
 if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
@@ -241,6 +315,9 @@ if [ ! -d "$PROJECT_ROOT/android" ]; then
   echo "Error: Android project folder was not created."
   exit 1
 fi
+
+normalize_generated_android_xml
+normalize_generated_android_gradle
 
 log "Building APK..."
 clear_react_bundle_cache

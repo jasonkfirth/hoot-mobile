@@ -21,74 +21,108 @@
 */
 
 import React, { useState } from "react";
-import { Platform, Pressable, StyleSheet, ImageBackground } from "react-native";
+import {
+  ImageBackground,
+  Platform,
+  Pressable,
+  StyleSheet,
+} from "react-native";
 import Icon from "@expo/vector-icons/Ionicons";
 import { Text } from "./Themed";
 import * as Haptics from "../services/HapticService";
-import { openURL } from "expo-linking";
 import useTheme from "../hooks/useTheme";
 import useHrefData from "../hooks/useHrefData";
 import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
+import {
+  getOpenableExternalUrl,
+  openExternalLink,
+} from "../utils/externalLink";
 
 export default function HrefDisplay({ href }: { href: string }) {
   const [imgAspect, setImgAspect] = useState(1);
   const hrefData = useHrefData(href);
   const theme = useTheme();
+  const imageLinkUrl =
+    hrefData.imageUrl && hrefData.linkUrl && !hrefData.isVideo
+      ? hrefData.linkUrl
+      : undefined;
 
   function openLink() {
-    if (hrefData.linkUrl) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      openURL(hrefData.linkUrl);
+    const linkUrl = hrefData.linkUrl;
+    if (!linkUrl) return;
+
+    const openableUrl = getOpenableExternalUrl(linkUrl);
+
+    if (!openableUrl) {
+      void openExternalLink(linkUrl);
+      return;
     }
+
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {
+      // Link opening should still continue if platform haptics are unavailable.
+    });
+
+    void openExternalLink(linkUrl);
+  }
+
+  function renderImagePreview() {
+    if (!hrefData.imageUrl) return null;
+
+    return (
+      <ImageBackground
+        style={[
+          styles.image,
+          {
+            aspectRatio: imgAspect,
+            backgroundColor: theme.secondaryBackground,
+          },
+        ]}
+        imageStyle={{
+          resizeMode: "contain",
+        }}
+        source={{
+          uri: hrefData.imageUrl,
+        }}
+        onLoad={event => {
+          Platform.OS !== "web" &&
+            setImgAspect(getSafeImageAspect(event.nativeEvent.source));
+        }}
+      >
+        {hrefData.isVideo && (
+          <Pressable
+            accessibilityLabel="Open video link"
+            accessibilityRole="button"
+            onPress={openLink}
+          >
+            <Icon
+              name="play-outline"
+              size={70}
+              color="#ffffffaa"
+              style={styles.playIcon}
+            />
+          </Pressable>
+        )}
+      </ImageBackground>
+    );
   }
 
   return (
     <>
-      {!!hrefData.imageUrl && (
-        <ImageBackground
-          style={[
-            styles.image,
-            {
-              aspectRatio: imgAspect,
-              backgroundColor: theme.secondaryBackground,
-            },
-          ]}
-          imageStyle={{
-            resizeMode: "contain",
-          }}
-          source={{
-            uri: hrefData.imageUrl,
-          }}
-          onLoad={event => {
-            Platform.OS !== "web" &&
-              setImgAspect(
-                Math.max(
-                  event.nativeEvent.source.width /
-                    event.nativeEvent.source.height,
-                  0.5,
-                ),
-              );
-          }}
-        >
-          {hrefData.isVideo && (
-            <Pressable
-              accessibilityLabel="Open video link"
-              accessibilityRole="button"
-              onPress={openLink}
-            >
-              <Icon
-                name="play-outline"
-                size={70}
-                color="#ffffffaa"
-                style={styles.playIcon}
-              />
-            </Pressable>
-          )}
-        </ImageBackground>
-      )}
-      {!!hrefData.linkUrl && (
+      {!!hrefData.imageUrl &&
+        (imageLinkUrl ? (
+          <Pressable
+            accessibilityLabel={`Open image link ${imageLinkUrl}`}
+            accessibilityRole="link"
+            onPress={openLink}
+          >
+            {renderImagePreview()}
+          </Pressable>
+        ) : (
+          renderImagePreview()
+        ))}
+      {!!hrefData.linkUrl && !imageLinkUrl && (
         <Pressable
-          accessibilityLabel={`Open link ${href}`}
+          accessibilityLabel={`Open link ${hrefData.linkUrl}`}
           accessibilityRole="link"
           style={[
             styles.link,
@@ -97,11 +131,24 @@ export default function HrefDisplay({ href }: { href: string }) {
           ]}
           onPress={openLink}
         >
-          <Text>{href}</Text>
+          <Text>{hrefData.linkUrl}</Text>
         </Pressable>
       )}
     </>
   );
+}
+
+export function getSafeImageAspect(source: { width?: number; height?: number }) {
+  if (
+    !Number.isFinite(source.width) ||
+    !Number.isFinite(source.height) ||
+    !source.width ||
+    !source.height
+  ) {
+    return 1;
+  }
+
+  return Math.max(source.width / source.height, 0.5);
 }
 
 const styles = StyleSheet.create({

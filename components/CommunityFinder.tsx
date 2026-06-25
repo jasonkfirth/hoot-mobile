@@ -33,6 +33,7 @@ import Icon from "@expo/vector-icons/Ionicons";
 import * as LotideService from "../services/LotideService";
 import ActorDisplayComponent from "./ActorDisplay";
 import ContentDisplay from "./ContentDisplay";
+import RetryState from "./RetryState";
 import useTheme from "../hooks/useTheme";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
@@ -48,10 +49,15 @@ export interface CommunityFinderProps {
 type CommunityFinderState = {
   key: string;
   communities: Community[];
+  isLoading: boolean;
+  loadError: string;
 };
 
 export default function CommunityFinder(props: CommunityFinderProps) {
   const [filterText, setFilterText] = useState("");
+  const [communityState, setCommunityState] =
+    useState<CommunityFinderState>();
+  const [reloadId, setReloadId] = useState(0);
   const ctx = useLotideCtx();
   const theme = useTheme();
   const listKey = [
@@ -59,11 +65,14 @@ export default function CommunityFinder(props: CommunityFinderProps) {
     ctx?.login?.user?.id ?? "anonymous",
     props.onlyFollowing ? "mine" : "everything",
     props.focusId ?? 0,
+    reloadId,
   ].join("|");
-  const [communityState, setCommunityState] =
-    useState<CommunityFinderState>();
-  const communities =
-    communityState?.key === listKey ? communityState.communities : undefined;
+  const currentState = communityState?.key === listKey
+    ? communityState
+    : undefined;
+  const communities = currentState?.communities;
+  const isLoadingCommunities = !currentState || currentState.isLoading;
+  const loadError = currentState?.loadError ?? "";
 
   const communitiesToDisplay = (() => {
     if (props.onlyWhenTyping && filterText === "") return [];
@@ -85,22 +94,28 @@ export default function CommunityFinder(props: CommunityFinderProps) {
           setCommunityState({
             key: listKey,
             communities,
+            isLoading: false,
+            loadError: "",
           });
         }
       })
       .catch(() => {
         if (isActive) {
-          setCommunityState({
+          setCommunityState(previousState => ({
             key: listKey,
-            communities: [],
-          });
+            communities: previousState?.key === listKey
+              ? previousState.communities
+              : [],
+            isLoading: false,
+            loadError: "Cannot load communities",
+          }));
         }
       });
 
     return () => {
       isActive = false;
     };
-  }, [ctx, listKey, props.onlyFollowing]);
+  }, [ctx, listKey, props.onlyFollowing, reloadId]);
 
   const renderItem = ({ item }: { item: Community }) => {
     const description = item.description;
@@ -188,6 +203,15 @@ export default function CommunityFinder(props: CommunityFinderProps) {
       contentContainerStyle={styles.list}
       stickyHeaderIndices={[0]}
       style={{ backgroundColor: theme.background }}
+      ListEmptyComponent={
+        <CommunityFinderEmptyState
+          hasFilter={filterText.trim() !== ""}
+          isLoading={isLoadingCommunities}
+          loadError={loadError}
+          onRetry={() => setReloadId(value => value + 1)}
+          onlyWhenTyping={props.onlyWhenTyping || false}
+        />
+      }
       ListHeaderComponent={
         <View style={{ backgroundColor: theme.background, padding: 15 }}>
           <TextInput
@@ -200,6 +224,51 @@ export default function CommunityFinder(props: CommunityFinderProps) {
         </View>
       }
     />
+  );
+}
+
+function CommunityFinderEmptyState({
+  hasFilter,
+  isLoading,
+  loadError,
+  onRetry,
+  onlyWhenTyping,
+}: {
+  hasFilter: boolean;
+  isLoading: boolean;
+  loadError: string;
+  onRetry: () => void;
+  onlyWhenTyping: boolean;
+}) {
+  const theme = useTheme();
+
+  if (onlyWhenTyping && !hasFilter) return null;
+
+  if (loadError) {
+    return (
+      <RetryState
+        compact
+        message={loadError}
+        onRetry={onRetry}
+        style={styles.emptyState}
+      />
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={{ color: theme.secondaryText }}>Loading communities...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.emptyState}>
+      <Text style={{ color: theme.secondaryText }}>
+        {hasFilter ? "No matching communities" : "No communities found"}
+      </Text>
+    </View>
   );
 }
 
@@ -222,6 +291,11 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth || 1,
     paddingHorizontal: 20,
     marginHorizontal: 20,
+  },
+  emptyState: {
+    marginHorizontal: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
 });
 

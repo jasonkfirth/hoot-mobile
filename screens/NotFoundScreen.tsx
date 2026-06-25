@@ -20,22 +20,28 @@
 */
 
 import * as React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { RootStackScreenProps } from '../types';
-import { MINIMUM_TOUCH_TARGET_SIZE } from '../constants/TouchTargets';
+import AppButton from '../components/AppButton';
+import { Text, View } from '../components/Themed';
+import useTheme from '../hooks/useTheme';
 
 export default function NotFoundScreen({ navigation }: RootStackScreenProps<'NotFound'>) {
+  const theme = useTheme();
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>This screen doesn&apos;t exist.</Text>
-      <TouchableOpacity
-        accessibilityRole="button"
+      <Text style={styles.title}>Screen not found</Text>
+      <Text secondary style={styles.message}>
+        This link does not match a screen Hoot can open.
+      </Text>
+      <AppButton
+        title="Go Home"
         onPress={() => navigation.replace('Root')}
-        style={styles.link}
-      >
-        <Text style={styles.linkText}>Go to home screen!</Text>
-      </TouchableOpacity>
+        color={theme.tint}
+        style={styles.button}
+      />
     </View>
   );
 }
@@ -43,7 +49,6 @@ export default function NotFoundScreen({ navigation }: RootStackScreenProps<'Not
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
@@ -51,18 +56,15 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
-  link: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  message: {
+    fontSize: 15,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  button: {
     marginTop: 15,
-    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
-    minWidth: 120,
-    paddingVertical: 15,
-  },
-  linkText: {
-    fontSize: 14,
-    color: '#2e78b7',
   },
 });
 

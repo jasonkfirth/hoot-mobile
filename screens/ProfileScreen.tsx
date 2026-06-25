@@ -13,6 +13,7 @@
         - Load profile and followed communities
         - Render profile description and account rows
         - Handle logout and navigation to activity/moderation/settings
+        - Keep persisted account changes ordered and duplicate-safe
 
     This file intentionally does NOT contain:
 
@@ -20,8 +21,14 @@
         - moderation flag detail
 */
 
-import React, { useEffect, useState } from "react";
-import { Alert, Platform, ScrollView, StyleSheet } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  Alert,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+} from "react-native";
 import { View, Text } from "../components/Themed";
 import { getUserData } from "../services/LotideService";
 import { RootTabScreenProps } from "../types";
@@ -37,18 +44,71 @@ import { TappableList } from "../components/TappableList";
 import ContentDisplay from "../components/ContentDisplay";
 import RetryState from "../components/RetryState";
 import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
+import { getErrorMessage } from "../utils/error";
+import { logWarning } from "../utils/debugLog";
+
+type ProfileLoadState = {
+  profile?: Profile;
+  loadError: string;
+  scopeKey?: string;
+  hasLoaded: boolean;
+  isLoading: boolean;
+};
+
+type FollowedCommunitiesState = {
+  communities: Community[];
+  loadError: string;
+  scopeKey?: string;
+  isLoading: boolean;
+};
+
+type AccountAction = "switch" | "logout";
 
 export default function ProfileScreen({
   navigation,
 }: RootTabScreenProps<"ProfileScreen">) {
-  const [profile, setProfile] = useState<Profile>();
-  const [communities, setCommunities] = useState<Community[]>([]);
+  const [profileState, setProfileState] = useState<ProfileLoadState>({
+    loadError: "",
+    hasLoaded: false,
+    isLoading: true,
+  });
+  const [followedCommunitiesState, setFollowedCommunitiesState] =
+    useState<FollowedCommunitiesState>({
+      communities: [],
+      loadError: "",
+      isLoading: true,
+    });
   const [focusId, setFocusId] = useState(0);
-  const [profileLoadError, setProfileLoadError] = useState("");
-  const [hasLoadedProfile, setHasLoadedProfile] = useState(false);
+  const [pendingAccountAction, setPendingAccountAction] =
+    useState<AccountAction | null>(null);
+  const isMountedRef = useRef(true);
+  const pendingAccountActionRef = useRef<AccountAction | null>(null);
+  const logoutPromptOpenRef = useRef(false);
   const theme = useTheme();
   const ctx = useLotideCtx();
   const dispatch = useDispatch();
+  const userId = ctx?.login?.user?.id;
+  const profileScopeKey =
+    `${ctx?.apiUrl ?? ""}::${ctx?.login?.token ?? ""}::${userId ?? ""}`;
+  const isCurrentProfileScope = profileState.scopeKey === profileScopeKey;
+  const isCurrentCommunitiesScope =
+    followedCommunitiesState.scopeKey === profileScopeKey;
+  const profile = isCurrentProfileScope ? profileState.profile : undefined;
+  const profileLoadError = isCurrentProfileScope ? profileState.loadError : "";
+  const hasLoadedProfile = isCurrentProfileScope
+    ? profileState.hasLoaded
+    : false;
+  const communities = isCurrentCommunitiesScope
+    ? followedCommunitiesState.communities
+    : [];
+  const communitiesLoadError = isCurrentCommunitiesScope
+    ? followedCommunitiesState.loadError
+    : "";
+  const isRefreshing =
+    (isCurrentProfileScope && profileState.isLoading && !!profile) ||
+    (isCurrentCommunitiesScope &&
+      followedCommunitiesState.isLoading &&
+      communities.length > 0);
 
   useEffect(
     () => navigation.addListener("focus", () => setFocusId(x => x + 1)),
@@ -56,54 +116,109 @@ export default function ProfileScreen({
   );
 
   useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      logoutPromptOpenRef.current = false;
+      pendingAccountActionRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ctx?.login) return;
 
     let isActive = true;
+    const requestScopeKey = profileScopeKey;
 
     LotideService.getAllCommunities(ctx, true)
       .then(communities => {
         if (!isActive) return;
-        setProfileLoadError("");
-        setCommunities(communities);
+
+        setFollowedCommunitiesState({
+          communities,
+          loadError: "",
+          scopeKey: requestScopeKey,
+          isLoading: false,
+        });
       })
       .catch(() => {
         if (!isActive) return;
-        setCommunities([]);
-        setProfileLoadError("");
+
+        setFollowedCommunitiesState(previousState => ({
+          communities:
+            previousState.scopeKey === requestScopeKey
+              ? previousState.communities
+              : [],
+          loadError: "Cannot load followed communities",
+          scopeKey: requestScopeKey,
+          isLoading: false,
+        }));
       });
 
     return () => {
       isActive = false;
     };
-  }, [ctx, focusId]);
+  }, [ctx, focusId, profileScopeKey]);
 
   useEffect(() => {
     if (!ctx?.login) return;
 
-    const userId = ctx.login.user?.id;
     if (!userId) {
       return;
     }
 
+    let isActive = true;
+    const requestScopeKey = profileScopeKey;
+
     getUserData(ctx, userId)
       .then(profileData => {
-        setProfile(profileData);
-        setProfileLoadError("");
+        if (!isActive) return;
+
+        setProfileState({
+          profile: profileData,
+          loadError: "",
+          scopeKey: requestScopeKey,
+          hasLoaded: true,
+          isLoading: false,
+        });
       })
       .catch(() => {
-        setProfileLoadError("Cannot load profile");
-        setProfile(undefined);
-      })
-      .finally(() => setHasLoadedProfile(true));
-  }, [ctx, focusId]);
+        if (!isActive) return;
 
-  if (ctx?.login === undefined) {
+        setProfileState(previousState => ({
+          profile:
+            previousState.scopeKey === requestScopeKey
+              ? previousState.profile
+              : undefined,
+          loadError: "Cannot load profile",
+          scopeKey: requestScopeKey,
+          hasLoaded: true,
+          isLoading: false,
+        }));
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [ctx, focusId, profileScopeKey, userId]);
+
+  if (!ctx?.login) {
     return <SuggestLogin />;
   }
 
+  const activeCtx = ctx;
+
   const retryProfileLoad = () => {
-    setProfileLoadError("");
-    setHasLoadedProfile(false);
+    setProfileState(previousState => ({
+      ...previousState,
+      loadError: "",
+      hasLoaded: previousState.profile ? previousState.hasLoaded : false,
+      isLoading: true,
+    }));
+    setFollowedCommunitiesState(previousState => ({
+      ...previousState,
+      loadError: "",
+      isLoading: true,
+    }));
     setFocusId(x => x + 1);
   };
 
@@ -118,7 +233,7 @@ export default function ProfileScreen({
     );
   }
 
-  if (profileLoadError) {
+  if (!profile && profileLoadError) {
     return (
       <View style={[styles.container, { backgroundColor: theme.background }]}>
         <RetryState message={profileLoadError} onRetry={retryProfileLoad} />
@@ -145,10 +260,89 @@ export default function ProfileScreen({
     );
   }
 
+  function alertIfMounted(title: string, message: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
+  }
+
+  function beginAccountAction(action: AccountAction): boolean {
+    if (pendingAccountActionRef.current) return false;
+
+    pendingAccountActionRef.current = action;
+
+    if (isMountedRef.current) {
+      setPendingAccountAction(action);
+    }
+
+    return true;
+  }
+
+  function finishAccountAction(action: AccountAction) {
+    if (pendingAccountActionRef.current === action) {
+      pendingAccountActionRef.current = null;
+    }
+
+    if (isMountedRef.current) {
+      setPendingAccountAction(currentAction =>
+        currentAction === action ? null : currentAction,
+      );
+    }
+  }
+
+  const clearActiveContext = async () => {
+    await StorageService.lotideContext.remove();
+    dispatch(setCtx({}));
+  };
+
+  async function switchAccount() {
+    if (!beginAccountAction("switch")) return;
+
+    try {
+      await clearActiveContext();
+    } catch (error) {
+      alertIfMounted("Cannot switch account", getErrorMessage(error));
+    } finally {
+      finishAccountAction("switch");
+    }
+  }
+
+  async function finishLogout(updateStoredAccount: () => Promise<unknown>) {
+    if (!beginAccountAction("logout")) return;
+
+    try {
+      try {
+        await updateStoredAccount();
+      } catch (error) {
+        logWarning("Failed to update saved Lotide account", getErrorMessage(error));
+      }
+
+      try {
+        await LotideService.logout(activeCtx);
+      } catch (error) {
+        logWarning("Failed to invalidate Lotide login", getErrorMessage(error));
+      }
+
+      try {
+        await clearActiveContext();
+      } catch (error) {
+        alertIfMounted("Cannot clear active account", getErrorMessage(error));
+      }
+    } finally {
+      finishAccountAction("logout");
+    }
+  }
+
+  function closeLogoutPrompt() {
+    logoutPromptOpenRef.current = false;
+  }
+
   function logout() {
-    if (!ctx?.login) return;
-    const accountKey = ctx.login.user
-      ? `${ctx.login.user.username}@${ctx.apiUrl}`
+    if (!activeCtx.login) return;
+    if (pendingAccountActionRef.current || logoutPromptOpenRef.current) return;
+
+    const accountKey = activeCtx.login.user
+      ? `${activeCtx.login.user.username}@${activeCtx.apiUrl}`
       : undefined;
     const removeStoredAccount = () =>
       accountKey
@@ -156,11 +350,11 @@ export default function ProfileScreen({
         : Promise.resolve(undefined);
 
     if (Platform.OS === "web") {
-      removeStoredAccount()
-        .then(() => LotideService.logout(ctx))
-        .then(() => dispatch(setCtx({})));
+      void finishLogout(removeStoredAccount);
       return;
     }
+
+    logoutPromptOpenRef.current = true;
     Alert.alert(
       "Log out",
       "Would you like to keep the login profile handy for later?",
@@ -168,21 +362,21 @@ export default function ProfileScreen({
         {
           text: "Cancel",
           style: "cancel",
+          onPress: closeLogoutPrompt,
         },
         {
           text: "Remove",
           onPress: () => {
-            removeStoredAccount()
-              .then(() => LotideService.logout(ctx))
-              .then(() => dispatch(setCtx({})));
+            closeLogoutPrompt();
+            void finishLogout(removeStoredAccount);
           },
         },
         {
           text: "Keep",
           style: "default",
           onPress: () => {
-            StorageService.lotideContextKV.logout(ctx);
-            dispatch(setCtx({}));
+            closeLogoutPrompt();
+            void finishLogout(() => StorageService.lotideContextKV.logout(activeCtx));
           },
         },
       ],
@@ -193,6 +387,13 @@ export default function ProfileScreen({
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: theme.background }]}
+      testID="profile-scroll"
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={retryProfileLoad}
+        />
+      }
     >
       <View style={styles.header}>
         <View>
@@ -219,6 +420,14 @@ export default function ProfileScreen({
           )}
         </View>
       </View>
+      {profileLoadError ? (
+        <RetryState
+          compact
+          message={profileLoadError}
+          onRetry={retryProfileLoad}
+          style={styles.inlineError}
+        />
+      ) : null}
       <TappableList
         items={[
           {
@@ -236,13 +445,21 @@ export default function ProfileScreen({
             onPress: () => navigation.navigate("Moderation"),
           },
           {
-            title: "Switch Account",
+            title: pendingAccountAction === "switch"
+              ? "Switching Account..."
+              : "Switch Account",
             icon: "person-add-outline",
-            onPress: () => dispatch(setCtx({})),
+            disabled: !!pendingAccountAction,
+            onPress: () => {
+              void switchAccount();
+            },
           },
           {
-            title: "Log Out",
+            title: pendingAccountAction === "logout"
+              ? "Logging Out..."
+              : "Log Out",
             icon: "log-out-outline",
+            disabled: !!pendingAccountAction,
             onPress: () => logout(),
           },
           {
@@ -260,6 +477,14 @@ export default function ProfileScreen({
       />
 
       <Text style={styles.followingTitle}>Communities You Follow:</Text>
+      {communitiesLoadError ? (
+        <RetryState
+          compact
+          message={communitiesLoadError}
+          onRetry={retryProfileLoad}
+          style={styles.inlineError}
+        />
+      ) : null}
       {communities.map(community => (
         <View
           key={community.id}
@@ -343,6 +568,10 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     padding: 20,
+  },
+  inlineError: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
 });
 

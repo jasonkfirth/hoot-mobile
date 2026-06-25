@@ -11,6 +11,7 @@
     Responsibilities:
 
         • Verify invalid JSON is reported with a friendly error
+        • Verify stalled requests time out
         • Verify HTTP errors retain status and response body metadata
         • Verify authenticated endpoints fail before issuing bad requests
 
@@ -21,7 +22,13 @@
         • Live network integration tests
 */
 
-import { isAuthenticationError, lotideRequest, readJson } from "../util";
+import {
+  isAuthenticationError,
+  LOTIDE_REQUEST_TIMEOUT_MS,
+  lotideRequest,
+  normalizeLotideApiUrl,
+  readJson,
+} from "../util";
 
 describe("Lotide service utilities", () => {
   beforeEach(() => {
@@ -29,6 +36,7 @@ describe("Lotide service utilities", () => {
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
@@ -60,7 +68,7 @@ describe("Lotide service utilities", () => {
 
     expect(global.fetch).toHaveBeenCalledWith(
       "https://lotide.fbxl.net/api/unstable/posts",
-      {
+      expect.objectContaining({
         method: "POST",
         headers: {
           Authorization: "Bearer token-1",
@@ -69,8 +77,109 @@ describe("Lotide service utilities", () => {
         body: JSON.stringify({
           title: "Lotide post",
         }),
-      },
+      }),
     );
+  });
+
+  test("normalizes trailing API slashes before making requests", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ id: 7 }),
+    });
+
+    await lotideRequest(
+      {
+        apiUrl: " https://lotide.fbxl.net/api/unstable/// ",
+      },
+      "GET",
+      "/instance",
+      undefined,
+      true,
+    );
+
+    expect(normalizeLotideApiUrl(
+      " https://lotide.fbxl.net/api/unstable/// ",
+    )).toBe("https://lotide.fbxl.net/api/unstable");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://lotide.fbxl.net/api/unstable/instance",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      text: jest.fn().mockResolvedValue("temporarily unavailable"),
+    });
+
+    await expect(
+      lotideRequest(
+        {
+          apiUrl: " https://lotide.fbxl.net/api/unstable/// ",
+        },
+        "GET",
+        "/instance",
+        undefined,
+        true,
+      ),
+    ).rejects.toMatchObject({
+      body: "temporarily unavailable",
+      path: "https://lotide.fbxl.net/api/unstable/instance",
+      status: 503,
+    });
+  });
+
+  test("clears request timeouts after completed requests", async () => {
+    jest.useFakeTimers();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ id: 7 }),
+    });
+
+    await lotideRequest(
+      {
+        apiUrl: "https://lotide.fbxl.net/api/unstable",
+      },
+      "GET",
+      "instance",
+      undefined,
+      true,
+    );
+
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test("times out stalled Lotide requests", async () => {
+    jest.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+
+    global.fetch = jest.fn((_url, options?: RequestInit) => {
+      requestSignal = options?.signal;
+      return new Promise<Response>(() => {});
+    });
+
+    const request = lotideRequest(
+      {
+        apiUrl: "https://lotide.fbxl.net/api/unstable",
+      },
+      "GET",
+      "instance",
+      undefined,
+      true,
+    );
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(LOTIDE_REQUEST_TIMEOUT_MS);
+
+    await expect(request).rejects.toMatchObject({
+      message: "The Lotide server did not respond within 30 seconds.",
+      method: "GET",
+      path: "https://lotide.fbxl.net/api/unstable/instance",
+    });
+    expect(requestSignal?.aborted).toBe(true);
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   test("keeps HTTP error status and body metadata", async () => {

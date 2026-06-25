@@ -11,7 +11,8 @@
     Responsibilities:
 
         - Choose editable markdown/text from server content
-        - Submit description updates
+        - Submit trimmed description updates
+        - Prevent duplicate in-flight updates
         - Return to refreshed community details
 
     This file intentionally does NOT contain:
@@ -20,7 +21,7 @@
         - moderation actions
 */
 
-import React, { useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
   Keyboard,
@@ -31,6 +32,7 @@ import {
 } from "react-native";
 import AppButton from "../components/AppButton";
 import { TextInput } from "../components/Themed";
+import SuggestLogin from "../components/SuggestLogin";
 import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
 import * as LotideService from "../services/LotideService";
@@ -46,19 +48,65 @@ export default function EditCommunityScreen({
   const [description, setDescription] = useState(
     getEditableCommunityDescription(community.description),
   );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isMountedRef = useRef(true);
+  const isSubmittingRef = useRef(false);
   const theme = useTheme();
   const ctx = useLotideCtx();
 
-  function submit() {
-    if (!ctx) return;
-    LotideService.editCommunity(ctx, community.id, description)
-      .then(() => LotideService.getCommunity(ctx, community.id))
-      .then(data =>
-        navigation.navigate("Community", {
-          community: data,
-        }),
-      )
-      .catch(e => Alert.alert("Failed to edit community", getErrorMessage(e)));
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      isSubmittingRef.current = false;
+    };
+  }, []);
+
+  if (!ctx?.login) {
+    return <SuggestLogin />;
+  }
+
+  const activeCtx = ctx;
+
+  function alertIfMounted(title: string, message: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
+  }
+
+  async function submit() {
+    if (isSubmittingRef.current) return;
+    if (isSubmitting) return;
+
+    const trimmedDescription = description.trim();
+
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+
+    try {
+      await LotideService.editCommunity(
+        activeCtx,
+        community.id,
+        trimmedDescription,
+      );
+
+      if (!isMountedRef.current) return;
+
+      const data = await LotideService.getCommunity(activeCtx, community.id);
+
+      if (!isMountedRef.current) return;
+
+      navigation.navigate("Community", {
+        community: data,
+      });
+    } catch (e) {
+      alertIfMounted("Failed to edit community", getErrorMessage(e));
+    } finally {
+      isSubmittingRef.current = false;
+
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
   }
 
   return (
@@ -78,13 +126,23 @@ export default function EditCommunityScreen({
           style={styles.title}
         />
         <TextInput
+          accessibilityLabel="Community description"
           style={styles.input}
           multiline
           placeholder="Add a description"
           value={description}
           onChangeText={setDescription}
         />
-        <AppButton title="Submit" color={theme.tint} onPress={submit} fullWidth />
+        <AppButton
+          title={isSubmitting ? "Saving..." : "Save Description"}
+          accessibilityLabel="Save community description"
+          color={theme.tint}
+          disabled={isSubmitting}
+          onPress={() => {
+            void submit();
+          }}
+          fullWidth
+        />
       </Pressable>
     </KeyboardAvoidingView>
   );

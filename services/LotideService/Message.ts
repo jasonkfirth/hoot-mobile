@@ -38,10 +38,16 @@ function requirePrivateMessages(ctx: LotideContext) {
 
 export async function getPrivateMessageConversations(
   ctx: LotideContext,
+  page?: string,
 ): Promise<Paged<PrivateMessage>> {
   requirePrivateMessages(ctx);
 
-  return lotideRequest(ctx, "GET", "users/~me/messages?conversations=true")
+  const query = [
+    "conversations=true",
+    page ? `page=${encodeURIComponent(page)}` : undefined,
+  ].filter(Boolean).join("&");
+
+  return lotideRequest(ctx, "GET", `users/~me/messages?${query}`)
     .then(readJson)
     .then(data =>
       normalizePaged(data, normalizePrivateMessage, "private messages"),
@@ -51,10 +57,16 @@ export async function getPrivateMessageConversations(
 export async function getPrivateMessageThread(
   ctx: LotideContext,
   userId: UserId,
+  page?: string,
 ): Promise<Paged<PrivateMessage>> {
   requirePrivateMessages(ctx);
 
-  return lotideRequest(ctx, "GET", `users/~me/messages?with_user=${userId}`)
+  const query = [
+    `with_user=${userId}`,
+    page ? `page=${encodeURIComponent(page)}` : undefined,
+  ].filter(Boolean).join("&");
+
+  return lotideRequest(ctx, "GET", `users/~me/messages?${query}`)
     .then(readJson)
     .then(data =>
       normalizePaged(data, normalizePrivateMessage, "private message thread"),

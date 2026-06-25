@@ -11,6 +11,8 @@
     Responsibilities:
 
         - Verify enabling notifications creates a local baseline
+        - Verify notification dedupe state remains bounded and current-page first
+        - Verify large notification batches are summarized instead of flooding
         - Verify mobile notifications do not depend only on Lotide's
           globally consumed unseen flag
         - Verify first-run polling does not alert for old notification history
@@ -30,9 +32,13 @@ import * as TaskManager from "expo-task-manager";
 
 import * as LotideService from "../LotideService";
 import {
+  clearLastNotificationResponse,
+  getNotificationDiagnostics,
+  getLastNotificationNavigationTarget,
   getNotificationNavigationTarget,
   getNotificationNavigationTargetFromResponse,
   pollNotificationsNow,
+  sendTestNotification,
   setNotificationEnabled,
 } from "../LotideNotificationPoller";
 
@@ -70,6 +76,8 @@ const mockGetNotifications = LotideService.getNotifications as jest.Mock;
 const mockGetBackgroundTaskStatus = BackgroundTask.getStatusAsync as jest.Mock;
 const mockRegisterTask = BackgroundTask.registerTaskAsync as jest.Mock;
 const mockIsTaskRegistered = TaskManager.isTaskRegisteredAsync as jest.Mock;
+const notificationTaskHandler = (TaskManager.defineTask as jest.Mock).mock
+  .calls[0]?.[1] as (() => Promise<unknown>) | undefined;
 const mockScheduleNotification =
   Notifications.scheduleNotificationAsync as jest.Mock;
 const mockSetNotificationChannel =
@@ -78,8 +86,14 @@ const mockGetNotificationPermissions =
   Notifications.getPermissionsAsync as jest.Mock;
 const mockRequestNotificationPermissions =
   Notifications.requestPermissionsAsync as jest.Mock;
+const mockGetLastNotificationResponse =
+  Notifications.getLastNotificationResponse as jest.Mock;
+const mockClearLastNotificationResponse =
+  Notifications.clearLastNotificationResponse as jest.Mock;
 
 const notificationChannelId = "lotide-notifications-v2";
+const notificationStateKey = "@lotide_notification_poll_state";
+const notificationSettingKey = "@lotide_notification_background_enabled";
 
 const ctx: LotideContext = {
   apiUrl: "https://lotide.fbxl.net/api/unstable",
@@ -108,6 +122,42 @@ function replyNotification(
     },
     postId,
   };
+}
+
+function replyFingerprint(postId: PostId, commentId: CommentId): string {
+  return `reply:post:${postId}:${commentId}:${postId}`;
+}
+
+function replyNotifications(
+  count: number,
+  firstPostId: PostId,
+): ReplyNotification[] {
+  const notifications: ReplyNotification[] = [];
+
+  for (let index = 0; index < count; index++) {
+    const postId = firstPostId + index;
+    notifications.push(replyNotification(postId, postId + 1000, false));
+  }
+
+  return notifications;
+}
+
+function accountKeyForContext(context: LotideContext): string {
+  return `${context.apiUrl}::${context.login?.user?.username}`;
+}
+
+async function storedNotificationIds(
+  context: LotideContext,
+): Promise<string[]> {
+  const stored = await AsyncStorage.getItem(notificationStateKey);
+  const state = JSON.parse(stored ?? "{}") as Record<string, {
+    ids?: unknown;
+  }>;
+  const ids = state[accountKeyForContext(context)]?.ids;
+
+  return Array.isArray(ids)
+    ? ids.filter((item: unknown): item is string => typeof item === "string")
+    : [];
 }
 
 function privateMessageNotification(): PrivateMessageNotification {
@@ -139,6 +189,22 @@ function privateMessageNotification(): PrivateMessageNotification {
   };
 }
 
+function notificationResponse(
+  data: Record<string, unknown>,
+  actionIdentifier = Notifications.DEFAULT_ACTION_IDENTIFIER,
+): Notifications.NotificationResponse {
+  return {
+    actionIdentifier,
+    notification: {
+      request: {
+        content: {
+          data,
+        },
+      },
+    },
+  } as unknown as Notifications.NotificationResponse;
+}
+
 describe("LotideNotificationPoller", () => {
   beforeAll(() => {
     Object.defineProperty(Platform, "OS", {
@@ -156,13 +222,17 @@ describe("LotideNotificationPoller", () => {
     mockIsTaskRegistered.mockResolvedValue(false);
     mockGetNotifications.mockResolvedValue([]);
     mockGetNotificationPermissions.mockResolvedValue({
+      canAskAgain: false,
       granted: true,
       status: "granted",
     });
     mockRequestNotificationPermissions.mockResolvedValue({
+      canAskAgain: false,
       granted: true,
       status: "granted",
     });
+    mockGetLastNotificationResponse.mockReturnValue(null);
+    mockClearLastNotificationResponse.mockImplementation(() => undefined);
   });
 
   test("creates a notification baseline when notifications are enabled", async () => {
@@ -176,12 +246,27 @@ describe("LotideNotificationPoller", () => {
     expect(mockScheduleNotification).not.toHaveBeenCalled();
   });
 
+  test("keeps notification baselines bounded and current-page first", async () => {
+    mockGetNotifications.mockResolvedValue(replyNotifications(260, 1000));
+
+    await setNotificationEnabled(true, ctx);
+
+    const ids = await storedNotificationIds(ctx);
+    expect(ids).toHaveLength(250);
+    expect(ids[0]).toBe(replyFingerprint(1000, 2000));
+    expect(ids).toContain(replyFingerprint(1249, 2249));
+    expect(ids).not.toContain(replyFingerprint(1250, 2250));
+    expect(mockScheduleNotification).not.toHaveBeenCalled();
+  });
+
   test("requests OS notification permission while enabling notifications", async () => {
     mockGetNotificationPermissions.mockResolvedValue({
+      canAskAgain: true,
       granted: false,
       status: "undetermined",
     });
     mockRequestNotificationPermissions.mockResolvedValue({
+      canAskAgain: false,
       granted: true,
       status: "granted",
     });
@@ -255,6 +340,62 @@ describe("LotideNotificationPoller", () => {
         trigger: { channelId: notificationChannelId },
       }),
     );
+
+    await expect(getNotificationDiagnostics()).resolves.toEqual(
+      expect.objectContaining({
+        poll: expect.objectContaining({
+          lastAttemptAt: expect.any(String),
+          lastSuccessAt: expect.any(String),
+          lastScheduledAt: expect.any(String),
+          lastScheduledCount: 1,
+          lastError: undefined,
+        }),
+      }),
+    );
+  });
+
+  test("keeps the latest fetched notification page before older tracked ids", async () => {
+    const olderIds = replyNotifications(20, 10).map(item =>
+      replyFingerprint(item.postId, item.commentId),
+    );
+
+    await AsyncStorage.setItem(
+      notificationSettingKey,
+      JSON.stringify(true),
+    );
+    await AsyncStorage.setItem(
+      notificationStateKey,
+      JSON.stringify({
+        [accountKeyForContext(ctx)]: {
+          initialized: true,
+          ids: olderIds,
+        },
+      }),
+    );
+    mockGetNotifications.mockResolvedValue(replyNotifications(260, 1000));
+
+    const count = await pollNotificationsNow(ctx);
+
+    const ids = await storedNotificationIds(ctx);
+    expect(count).toBe(6);
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(6);
+    expect(mockScheduleNotification).toHaveBeenLastCalledWith({
+      content: {
+        title: "New Lotide notifications",
+        body: "255 more new notifications are waiting in Hoot.",
+        sound: "default",
+        data: {
+          lotideKind: "notification_summary",
+        },
+      },
+      trigger: { channelId: notificationChannelId },
+    });
+
+    expect(ids).toHaveLength(250);
+    expect(ids[0]).toBe(replyFingerprint(1000, 2000));
+    expect(ids).toContain(replyFingerprint(1249, 2249));
+    expect(ids).not.toContain(replyFingerprint(1250, 2250));
+    expect(ids).not.toContain(olderIds[0]);
   });
 
   test("routes private message notifications to the conversation thread", async () => {
@@ -328,6 +469,67 @@ describe("LotideNotificationPoller", () => {
     expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
   });
 
+  test("records poll diagnostics when polling is skipped by setting", async () => {
+    const count = await pollNotificationsNow(ctx);
+
+    expect(count).toBe(0);
+    expect(mockGetNotifications).not.toHaveBeenCalled();
+
+    await expect(getNotificationDiagnostics()).resolves.toEqual(
+      expect.objectContaining({
+        poll: expect.objectContaining({
+          lastAttemptAt: expect.any(String),
+          lastSuccessAt: expect.any(String),
+          lastScheduledCount: 0,
+          lastSkippedReason: "disabled",
+          lastError: undefined,
+        }),
+      }),
+    );
+  });
+
+  test("records poll diagnostics when a background wake has no signed-in context", async () => {
+    if (!notificationTaskHandler) {
+      throw new Error("Notification background task was not registered.");
+    }
+
+    const result = await notificationTaskHandler();
+
+    expect(result).toBe(BackgroundTask.BackgroundTaskResult.Success);
+    expect(mockGetNotifications).not.toHaveBeenCalled();
+    await expect(getNotificationDiagnostics()).resolves.toEqual(
+      expect.objectContaining({
+        poll: expect.objectContaining({
+          lastAttemptAt: expect.any(String),
+          lastSuccessAt: expect.any(String),
+          lastScheduledCount: 0,
+          lastSkippedReason: "no_context",
+          lastError: undefined,
+        }),
+      }),
+    );
+  });
+
+  test("records poll diagnostics when a poll fails", async () => {
+    await AsyncStorage.setItem(
+      "@lotide_notification_background_enabled",
+      JSON.stringify(true),
+    );
+    mockGetNotifications.mockRejectedValue(new Error("network down"));
+
+    await expect(pollNotificationsNow(ctx)).rejects.toThrow("network down");
+
+    await expect(getNotificationDiagnostics()).resolves.toEqual(
+      expect.objectContaining({
+        poll: expect.objectContaining({
+          lastAttemptAt: expect.any(String),
+          lastScheduledCount: 0,
+          lastError: "network down",
+        }),
+      }),
+    );
+  });
+
   test("does not leave notifications enabled when baseline creation fails", async () => {
     mockGetNotifications.mockRejectedValue(new Error("server unavailable"));
 
@@ -357,10 +559,12 @@ describe("LotideNotificationPoller", () => {
 
   test("does not enable notifications when OS permission is denied", async () => {
     mockGetNotificationPermissions.mockResolvedValue({
+      canAskAgain: false,
       granted: false,
       status: "denied",
     });
     mockRequestNotificationPermissions.mockResolvedValue({
+      canAskAgain: false,
       granted: false,
       status: "denied",
     });
@@ -377,6 +581,138 @@ describe("LotideNotificationPoller", () => {
     await expect(
       AsyncStorage.getItem("@lotide_notification_background_enabled"),
     ).resolves.toBeNull();
+  });
+
+  test("reports notification diagnostics without prompting permission", async () => {
+    await AsyncStorage.setItem(
+      "@lotide_notification_background_enabled",
+      JSON.stringify(true),
+    );
+    mockGetNotificationPermissions.mockResolvedValue({
+      canAskAgain: false,
+      granted: false,
+      status: "denied",
+    });
+    mockGetBackgroundTaskStatus.mockResolvedValue(
+      BackgroundTask.BackgroundTaskStatus.Available,
+    );
+    mockIsTaskRegistered.mockResolvedValue(true);
+
+    const diagnostics = await getNotificationDiagnostics();
+
+    expect(diagnostics).toEqual({
+      supported: true,
+      enabled: true,
+      permissionCanAskAgain: false,
+      permissionGranted: false,
+      permissionStatus: "denied",
+      backgroundAvailable: true,
+      backgroundStatus: BackgroundTask.BackgroundTaskStatus.Available,
+      taskRegistered: true,
+      channelId: notificationChannelId,
+      poll: {
+        lastScheduledCount: 0,
+      },
+      error: undefined,
+    });
+    expect(mockRequestNotificationPermissions).not.toHaveBeenCalled();
+  });
+
+  test("includes diagnostics errors without hiding successful checks", async () => {
+    mockGetNotificationPermissions.mockRejectedValue(new Error("bridge down"));
+    mockGetBackgroundTaskStatus.mockResolvedValue(
+      BackgroundTask.BackgroundTaskStatus.Restricted,
+    );
+    mockIsTaskRegistered.mockResolvedValue(false);
+
+    const diagnostics = await getNotificationDiagnostics();
+
+    expect(diagnostics.permissionGranted).toBe(false);
+    expect(diagnostics.permissionCanAskAgain).toBe(false);
+    expect(diagnostics.permissionStatus).toBe("unknown");
+    expect(diagnostics.backgroundAvailable).toBe(false);
+    expect(diagnostics.backgroundStatus).toBe(
+      BackgroundTask.BackgroundTaskStatus.Restricted,
+    );
+    expect(diagnostics.taskRegistered).toBe(false);
+    expect(diagnostics.poll).toEqual({
+      lastScheduledCount: 0,
+    });
+    expect(diagnostics.error).toContain("permission check failed: bridge down");
+  });
+
+  test("reports diagnostics when the stored setting cannot be read", async () => {
+    (AsyncStorage.getItem as jest.Mock).mockRejectedValueOnce(
+      new Error("storage down"),
+    );
+
+    const diagnostics = await getNotificationDiagnostics();
+
+    expect(diagnostics.enabled).toBe(false);
+    expect(diagnostics.supported).toBe(true);
+    expect(diagnostics.poll).toEqual({
+      lastScheduledCount: 0,
+    });
+    expect(diagnostics.error).toContain("setting read failed: storage down");
+  });
+
+  test("reports whether notification permission can still be requested", async () => {
+    mockGetNotificationPermissions.mockResolvedValue({
+      canAskAgain: true,
+      granted: false,
+      status: "undetermined",
+    });
+
+    const diagnostics = await getNotificationDiagnostics();
+
+    expect(diagnostics.permissionGranted).toBe(false);
+    expect(diagnostics.permissionCanAskAgain).toBe(true);
+    expect(diagnostics.permissionStatus).toBe("undetermined");
+    expect(mockRequestNotificationPermissions).not.toHaveBeenCalled();
+  });
+
+  test("sends a local test notification through the Lotide channel", async () => {
+    const notificationId = await sendTestNotification();
+
+    expect(notificationId).toBe("notification-id");
+    expect(mockSetNotificationChannel).toHaveBeenCalledWith(
+      notificationChannelId,
+      expect.objectContaining({
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: "default",
+      }),
+    );
+    expect(mockScheduleNotification).toHaveBeenCalledWith({
+      content: {
+        title: "Hoot notification test",
+        body: "Local Android notifications are working.",
+        sound: "default",
+        data: {
+          lotideKind: "diagnostic_test",
+        },
+      },
+      trigger: { channelId: notificationChannelId },
+    });
+  });
+
+  test("requests permission before sending a local test notification", async () => {
+    mockGetNotificationPermissions.mockResolvedValue({
+      canAskAgain: true,
+      granted: false,
+      status: "undetermined",
+    });
+    mockRequestNotificationPermissions.mockResolvedValue({
+      canAskAgain: false,
+      granted: true,
+      status: "granted",
+    });
+
+    await sendTestNotification();
+
+    expect(mockRequestNotificationPermissions).toHaveBeenCalledWith({
+      android: {},
+    });
+    expect(mockScheduleNotification).toHaveBeenCalledTimes(1);
   });
 
   test("requires a signed-in context before enabling notifications", async () => {
@@ -415,21 +751,60 @@ describe("LotideNotificationPoller", () => {
     });
   });
 
+  test("routes summary notifications to the notification list", () => {
+    expect(
+      getNotificationNavigationTarget({
+        lotideKind: "notification_summary",
+      }),
+    ).toEqual({
+      screen: "Notifications",
+    });
+  });
+
   test("ignores non-default notification actions", () => {
     expect(
-      getNotificationNavigationTargetFromResponse({
-        actionIdentifier: "custom-action",
-        notification: {
-          request: {
-            content: {
-              data: {
-                lotidePostId: 10,
-              },
-            },
-          },
-        },
-      } as unknown as Notifications.NotificationResponse),
+      getNotificationNavigationTargetFromResponse(
+        notificationResponse({ lotidePostId: 10 }, "custom-action"),
+      ),
     ).toBeUndefined();
+  });
+
+  test("builds cold-start navigation targets from the last notification response", () => {
+    mockGetLastNotificationResponse.mockReturnValue(
+      notificationResponse({
+        lotideKind: "private_message",
+        lotidePartnerId: "2",
+        lotidePartnerUsername: "remote",
+      }),
+    );
+
+    expect(getLastNotificationNavigationTarget()).toEqual({
+      screen: "MessageThread",
+      params: {
+        userId: 2,
+        username: "remote",
+      },
+    });
+  });
+
+  test("ignores unavailable native cold-start notification response caches", () => {
+    mockGetLastNotificationResponse.mockImplementation(() => {
+      throw new Error("native module unavailable");
+    });
+
+    expect(getLastNotificationNavigationTarget()).toBeUndefined();
+  });
+
+  test("clears native notification responses defensively", () => {
+    clearLastNotificationResponse();
+
+    expect(mockClearLastNotificationResponse).toHaveBeenCalledTimes(1);
+
+    mockClearLastNotificationResponse.mockImplementation(() => {
+      throw new Error("native module unavailable");
+    });
+
+    expect(() => clearLastNotificationResponse()).not.toThrow();
   });
 });
 

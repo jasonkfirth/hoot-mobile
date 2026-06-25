@@ -53,6 +53,7 @@ export interface CommentsDisplayProps {
   layer?: number;
   postId?: PostId;
   highlightedComments?: CommentId[];
+  reloadId?: number;
 }
 
 export default function CommentsDisplay({
@@ -62,10 +63,12 @@ export default function CommentsDisplay({
   layer = 0,
   postId,
   highlightedComments = [],
+  reloadId = 0,
 }: CommentsDisplayProps) {
   const { comments, isLoading, loadError, loadNextPage } = useComments(
     parentType,
     parentId,
+    reloadId,
   );
   const theme = useTheme();
   const ctx = useLotideCtx();
@@ -115,6 +118,7 @@ export default function CommentsDisplay({
           layerColors={layerColors}
           postId={postId}
           highlightedComments={highlightedComments}
+          reloadId={reloadId}
         />
       ))}
       {loadError ? (
@@ -153,6 +157,7 @@ function CommentDisplay({
   layerColors,
   postId,
   highlightedComments = [],
+  reloadId,
 }: {
   commentId: CommentId;
   layer: number;
@@ -160,14 +165,15 @@ function CommentDisplay({
   layerColors: ColorValue[];
   postId?: PostId;
   highlightedComments?: CommentId[];
+  reloadId: number;
 }) {
   const [commentReloadId, setCommentReloadId] = React.useState(0);
-  const comment = useComment(commentId, commentReloadId);
+  const comment = useComment(commentId, reloadId + commentReloadId);
   const {
     comments,
     loadError: childLoadError,
     loadNextPage,
-  } = useComments("comment", commentId);
+  } = useComments("comment", commentId, reloadId);
   const [showChildren, setShowChildren] = React.useState(true);
   const theme = useTheme();
   const ctx = useLotideCtx();
@@ -196,6 +202,12 @@ function CommentDisplay({
         }}
       >
         <Pressable
+          accessibilityLabel={
+            selectedComment === comment.id
+              ? "Hide comment actions"
+              : "Show comment actions"
+          }
+          accessibilityRole="button"
           onPress={() =>
             setSelectedComment(
               selectedComment !== comment.id ? comment.id : undefined,
@@ -282,6 +294,7 @@ function CommentDisplay({
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   navigation.navigate("Comment", {
                     id: comment.id,
+                    postId,
                     title: comment.author?.username || "Comment",
                     html: comment.content_html || comment.content_text || "",
                     type: "comment",
@@ -334,6 +347,7 @@ function CommentDisplay({
               navigation={navigation}
               postId={postId}
               highlightedComments={highlightedComments}
+              reloadId={reloadId}
             />
           </View>
         ) : (

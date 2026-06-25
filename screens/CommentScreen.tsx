@@ -20,13 +20,14 @@
         - post feed loading
 */
 
-import React, { useRef, useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
 } from "react-native";
 import AppButton from "../components/AppButton";
@@ -35,7 +36,6 @@ import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
 import * as LotideService from "../services/LotideService";
 import ContentDisplay from "../components/ContentDisplay";
-import { ScrollView } from "react-native-gesture-handler";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import { getErrorMessage } from "../utils/error";
 
@@ -44,27 +44,69 @@ export default function CommentScreen({
   route,
 }: RootStackScreenProps<"Comment">) {
   const [text, setText] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const isMountedRef = useRef(true);
+  const isSubmittingRef = useRef(false);
   const theme = useTheme();
   const ctx = useLotideCtx();
   const id = route.params.id;
+  const postId = route.params.postId;
   const title = route.params.title;
   const html = route.params.html;
   const type = route.params.type;
+  const trimmedText = text.trim();
+  const canSubmit = !!ctx?.login && !!trimmedText && !isSubmitting;
+
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      isSubmittingRef.current = false;
+    };
+  }, []);
+
+  function alertIfMounted(title: string, message: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
+  }
 
   function submit() {
-    if (!ctx?.login) return;
+    if (!ctx?.login || !trimmedText || isSubmittingRef.current) return;
+
     const onFailure = (error: unknown) => {
-      Alert.alert("Could not submit comment", getErrorMessage(error));
+      alertIfMounted("Could not submit comment", getErrorMessage(error));
+
+      if (isMountedRef.current) {
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
+      }
+    };
+    const targetPostId = type === "post" ? id : postId;
+    const navigateToSubmittedComment = (commentId: CommentId) => {
+      if (!isMountedRef.current) return;
+
+      if (!targetPostId) {
+        navigation.pop();
+        return;
+      }
+
+      navigation.navigate("Post", {
+        postId: targetPostId,
+        highlightedComments: [commentId],
+      });
     };
 
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+
     if (type === "post") {
-      LotideService.commentOnPost(ctx, id, text)
-        .then(() => navigation.pop())
+      LotideService.commentOnPost(ctx, id, trimmedText)
+        .then(result => navigateToSubmittedComment(result.id))
         .catch(onFailure);
     } else {
-      LotideService.commentOnComment(ctx, id, text)
-        .then(() => navigation.pop())
+      LotideService.commentOnComment(ctx, id, trimmedText)
+        .then(navigateToSubmittedComment)
         .catch(onFailure);
     }
   }
@@ -89,6 +131,7 @@ export default function CommentScreen({
           {!!title && <Text style={styles.title}>{title}</Text>}
           {!!html && <ContentDisplay contentHtml={html} />}
           <TextInput
+            accessibilityLabel="Comment"
             style={styles.input}
             multiline
             placeholder="Type your comment"
@@ -96,7 +139,14 @@ export default function CommentScreen({
             onChangeText={setText}
             onFocus={scrollToBottom}
           />
-          <AppButton title="Submit" color={theme.tint} onPress={submit} fullWidth />
+          <AppButton
+            title={isSubmitting ? "Submitting..." : "Submit"}
+            accessibilityLabel="Submit comment"
+            color={theme.tint}
+            disabled={!canSubmit}
+            onPress={submit}
+            fullWidth
+          />
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>

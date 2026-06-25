@@ -23,7 +23,7 @@
         • Moderation workflows
 */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Alert, FlatList, Pressable, StyleSheet } from "react-native";
 import ActorDisplayComponent from "../components/ActorDisplay";
 import ContentDisplay from "../components/ContentDisplay";
@@ -46,6 +46,20 @@ import { RootStackScreenProps } from "../types";
 /* Profile Activity Screen                                                   */
 /* ------------------------------------------------------------------------- */
 
+type ActivityLoadState = {
+  items: UserThing[];
+  nextPage?: string | null;
+  loadError: string;
+  scopeKey?: string;
+  isLoading: boolean;
+};
+
+type ProfileLoadState = {
+  profile?: Profile;
+  profileError: string;
+  scopeKey?: string;
+};
+
 export default function ProfileActivityScreen({
   navigation,
   route,
@@ -53,72 +67,155 @@ export default function ProfileActivityScreen({
   const ctx = useLotideCtx();
   const theme = useTheme();
   const userId = route.params?.userId ?? ctx?.login?.user?.id;
-  const [items, setItems] = useState<UserThing[]>([]);
-  const [nextPage, setNextPage] = useState<string | null | undefined>();
-  const [profile, setProfile] = useState<Profile | undefined>();
-  const [profileError, setProfileError] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+  const [activityState, setActivityState] = useState<ActivityLoadState>({
+    items: [],
+    loadError: "",
+    isLoading: true,
+  });
+  const [profileState, setProfileState] = useState<ProfileLoadState>({
+    profileError: "",
+  });
+  const nextPageRequestKey = useRef<string | null>(null);
   const [reloadId, setReloadId] = useState(0);
   const isOwnProfile = userId === ctx?.login?.user?.id;
+  const activityScopeKey =
+    `${ctx?.apiUrl ?? ""}::${ctx?.login?.token ?? ""}::${userId ?? ""}`;
+  const isCurrentActivityScope = activityState.scopeKey === activityScopeKey;
+  const isCurrentProfileScope = profileState.scopeKey === activityScopeKey;
+  const items = isCurrentActivityScope ? activityState.items : [];
+  const nextPage = isCurrentActivityScope ? activityState.nextPage : undefined;
+  const loadError = isCurrentActivityScope ? activityState.loadError : "";
+  const isLoading = activityState.isLoading || !isCurrentActivityScope;
+  const profile = isCurrentProfileScope ? profileState.profile : undefined;
+  const profileError = isCurrentProfileScope
+    ? profileState.profileError
+    : "";
 
   useEffect(() => {
     if (!ctx?.apiUrl || !userId) return;
 
+    let isActive = true;
+    const requestScopeKey = activityScopeKey;
+
     LotideService.getUserThings(ctx, userId)
       .then(data => {
-        setItems(data.items || []);
-        setNextPage(data.next_page);
-        setLoadError("");
-      })
-      .catch(() => {
-        setItems([]);
-        setNextPage(null);
-        setLoadError("Cannot load activity");
-      })
-      .finally(() => setIsLoading(false));
-  }, [ctx, userId, reloadId]);
-
-  useEffect(() => {
-    if (!ctx?.login || !userId) return;
-
-    let isActive = true;
-
-    LotideService.getUserData(ctx, userId)
-      .then(data => {
         if (!isActive) return;
-        setProfile(data);
-        setProfileError("");
+
+        setActivityState({
+          items: data.items || [],
+          nextPage: data.next_page,
+          loadError: "",
+          scopeKey: requestScopeKey,
+          isLoading: false,
+        });
       })
       .catch(() => {
         if (!isActive) return;
-        setProfile(undefined);
-        setProfileError("Cannot load profile");
+
+        setActivityState(previousState => {
+          const canPreserveItems =
+            previousState.scopeKey === requestScopeKey;
+
+          return {
+            items: canPreserveItems ? previousState.items : [],
+            nextPage: canPreserveItems ? previousState.nextPage : null,
+            loadError: "Cannot load activity",
+            scopeKey: requestScopeKey,
+            isLoading: false,
+          };
+        });
       });
 
     return () => {
       isActive = false;
     };
-  }, [ctx, userId, reloadId]);
+  }, [activityScopeKey, ctx, userId, reloadId]);
+
+  useEffect(() => {
+    if (!ctx?.login || !userId) return;
+
+    let isActive = true;
+    const requestScopeKey = activityScopeKey;
+
+    LotideService.getUserData(ctx, userId)
+      .then(data => {
+        if (!isActive) return;
+
+        setProfileState({
+          profile: data,
+          profileError: "",
+          scopeKey: requestScopeKey,
+        });
+      })
+      .catch(() => {
+        if (!isActive) return;
+
+        setProfileState(previousState => ({
+          profile:
+            previousState.scopeKey === requestScopeKey
+              ? previousState.profile
+              : undefined,
+          profileError: "Cannot load profile",
+          scopeKey: requestScopeKey,
+        }));
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [activityScopeKey, ctx, userId, reloadId]);
 
   if (!ctx?.login) return <SuggestLogin />;
 
   const retryLoad = () => {
-    setIsLoading(true);
-    setLoadError("");
+    nextPageRequestKey.current = null;
+    setActivityState(previousState => ({
+      ...previousState,
+      loadError: "",
+      isLoading: true,
+    }));
     setReloadId(x => x + 1);
   };
 
   const loadNextPage = () => {
     if (!ctx?.apiUrl || !userId || !nextPage) return;
 
+    const requestScopeKey = activityScopeKey;
+    const requestPageKey = `${requestScopeKey}::${nextPage}`;
+
+    if (nextPageRequestKey.current === requestPageKey) return;
+
+    nextPageRequestKey.current = requestPageKey;
+
     LotideService.getUserThings(ctx, userId, nextPage)
       .then(data => {
-        setItems(existingItems => [...existingItems, ...(data.items || [])]);
-        setNextPage(data.next_page);
+        setActivityState(previousState => {
+          if (previousState.scopeKey !== requestScopeKey) {
+            return previousState;
+          }
+
+          return {
+            ...previousState,
+            items: mergeActivityItems(previousState.items, data.items || []),
+            nextPage: data.next_page,
+            loadError: "",
+          };
+        });
       })
       .catch(() => {
-        setNextPage(null);
+        setActivityState(previousState =>
+          previousState.scopeKey === requestScopeKey
+            ? {
+                ...previousState,
+                nextPage: null,
+              }
+            : previousState,
+        );
+      })
+      .finally(() => {
+        if (nextPageRequestKey.current === requestPageKey) {
+          nextPageRequestKey.current = null;
+        }
       });
   };
 
@@ -129,21 +226,34 @@ export default function ProfileActivityScreen({
   return (
     <FlatList
       style={[styles.container, { backgroundColor: theme.background }]}
+      testID="profile-activity-list"
       data={items}
       renderItem={renderItem}
       keyExtractor={(item, index) => `${item.type}-${item.id}-${index}`}
       onEndReached={loadNextPage}
       onEndReachedThreshold={2}
+      refreshing={isLoading && items.length > 0}
+      onRefresh={retryLoad}
       ListHeaderComponent={
-        <ProfileActivityHeader
-          isOwnProfile={isOwnProfile}
-          onChanged={retryLoad}
-          profile={profile}
-          profileError={profileError}
-          routeUsername={route.params?.username}
-          userId={userId}
-          navigation={navigation}
-        />
+        <>
+          <ProfileActivityHeader
+            isOwnProfile={isOwnProfile}
+            onChanged={retryLoad}
+            profile={profile}
+            profileError={profileError}
+            routeUsername={route.params?.username}
+            userId={userId}
+            navigation={navigation}
+          />
+          {items.length > 0 && loadError ? (
+            <RetryState
+              compact
+              message={loadError}
+              onRetry={retryLoad}
+              style={styles.inlineError}
+            />
+          ) : null}
+        </>
       }
       ListEmptyComponent={
         !isLoading ? (
@@ -158,6 +268,29 @@ export default function ProfileActivityScreen({
       }
     />
   );
+}
+
+function mergeActivityItems(
+  currentItems: UserThing[],
+  incomingItems: UserThing[],
+) {
+  const seen = new Set(currentItems.map(activityItemKey));
+  const merged = [...currentItems];
+
+  incomingItems.forEach(item => {
+    const key = activityItemKey(item);
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(item);
+    }
+  });
+
+  return merged;
+}
+
+function activityItemKey(item: UserThing) {
+  return `${item.type}:${item.id}`;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -187,32 +320,86 @@ function ProfileActivityHeader({
   const canMessage = supportsPrivateMessages(ctx?.apiVersion);
   const isFollowing = !!profile?.your_follow;
   const displayName = profile?.username || routeUsername;
+  const [isFollowActionPending, setIsFollowActionPending] = useState(false);
+  const isMountedRef = useRef(true);
+  const followActionPendingRef = useRef(false);
+  const followLabel = profile?.your_follow?.accepted
+    ? "Unfollow"
+    : "Cancel Follow";
+  const pendingFollowLabel = isFollowing
+    ? profile?.your_follow?.accepted
+      ? "Unfollowing..."
+      : "Canceling..."
+    : "Following...";
+
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      followActionPendingRef.current = false;
+    };
+  }, []);
 
   if (!userId || (!profile && !profileError && !routeUsername)) {
     return null;
   }
 
-  function followOrUnfollow() {
-    if (!ctx?.login || !userId || isOwnProfile || !canFollowUsers) return;
+  function alertIfMounted(title: string, message?: string) {
+    if (!isMountedRef.current) return;
 
-    if (isFollowing) {
-      LotideService.unfollowUser(ctx, userId)
-        .then(onChanged)
-        .catch(() => Alert.alert("Failed to unfollow user"));
-      return;
+    Alert.alert(title, message);
+  }
+
+  function startFollowAction() {
+    if (followActionPendingRef.current) return false;
+
+    followActionPendingRef.current = true;
+    setIsFollowActionPending(true);
+    return true;
+  }
+
+  function finishFollowAction() {
+    followActionPendingRef.current = false;
+
+    if (isMountedRef.current) {
+      setIsFollowActionPending(false);
     }
+  }
 
-    LotideService.followUser(ctx, userId)
-      .then(result => {
-        if (!result.accepted) {
-          Alert.alert(
-            "Follow request sent",
-            "The remote user has not accepted the follow yet.",
-          );
+  async function followOrUnfollow() {
+    if (!ctx?.login || !userId || isOwnProfile || !canFollowUsers) return;
+    if (!startFollowAction()) return;
+
+    try {
+      if (isFollowing) {
+        await LotideService.unfollowUser(ctx, userId);
+
+        if (isMountedRef.current) {
+          onChanged();
         }
+        return;
+      }
+
+      const result = await LotideService.followUser(ctx, userId);
+
+      if (!isMountedRef.current) return;
+
+      if (!result.accepted) {
+        alertIfMounted(
+          "Follow request sent",
+          "The remote user has not accepted the follow yet.",
+        );
+      }
+
+      if (isMountedRef.current) {
         onChanged();
-      })
-      .catch(() => Alert.alert("Failed to follow user"));
+      }
+    } catch {
+      alertIfMounted(
+        isFollowing ? "Failed to unfollow user" : "Failed to follow user",
+      );
+    } finally {
+      finishFollowAction();
+    }
   }
 
   return (
@@ -266,13 +453,18 @@ function ProfileActivityHeader({
                   : `Follow ${displayName || "user"}`
               }
               accessibilityRole="button"
-              onPress={followOrUnfollow}
+              accessibilityState={{ disabled: isFollowActionPending }}
+              disabled={isFollowActionPending}
+              onPress={() => {
+                void followOrUnfollow();
+              }}
               style={[
                 styles.profileActionButton,
                 {
                   backgroundColor: isFollowing
                     ? theme.secondaryBackground
                     : theme.tint,
+                  opacity: isFollowActionPending ? 0.72 : 1,
                 },
               ]}
             >
@@ -282,11 +474,11 @@ function ProfileActivityHeader({
                   fontWeight: "600",
                 }}
               >
-                {isFollowing
-                  ? profile?.your_follow?.accepted
-                    ? "Unfollow"
-                    : "Cancel Follow"
-                  : "Follow"}
+                {isFollowActionPending
+                  ? pendingFollowLabel
+                  : isFollowing
+                    ? followLabel
+                    : "Follow"}
               </Text>
             </Pressable>
           ) : null}
@@ -478,6 +670,10 @@ const styles = StyleSheet.create({
   empty: {
     padding: 40,
     alignItems: "center",
+  },
+  inlineError: {
+    paddingHorizontal: 15,
+    paddingVertical: 14,
   },
 });
 

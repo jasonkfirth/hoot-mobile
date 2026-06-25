@@ -22,7 +22,6 @@
         • Direct API request logic (see services/LotideService)
 */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -35,11 +34,14 @@ import * as LotideService from "./services/LotideService";
 import * as LotideNotificationPoller from "./services/LotideNotificationPoller";
 import { Provider, useDispatch } from "react-redux";
 import { setCtx } from "./slices/lotideSlice";
+import { setAppSettings } from "./slices/settingsSlice";
 import reduxStore from "./store/reduxStore";
 import { useLotideCtx } from "./hooks/useLotideCtx";
 import { Alert, AppState, Platform } from "react-native";
 import { getErrorMessage } from "./utils/error";
 import { MINIMUM_LOTIDE_API_VERSION } from "./constants/LotideApi";
+import AppErrorBoundary from "./components/AppErrorBoundary";
+import { logWarning } from "./utils/debugLog";
 
 /* ------------------------------------------------------------------------- */
 /* Main Application Component                                                */
@@ -54,7 +56,7 @@ function App() {
   const applyNewContext = useCallback(
     async (nextCtx: LotideContext) => {
       await StorageService.lotideContextKV.store(nextCtx);
-      await AsyncStorage.setItem("@lotide_ctx", JSON.stringify(nextCtx));
+      await StorageService.lotideContext.store(nextCtx);
       dispatch(setCtx(nextCtx));
     },
     [dispatch],
@@ -67,7 +69,7 @@ function App() {
   useEffect(() => {
     if (Platform.OS === "android") {
       LotideNotificationPoller.registerNotificationPollTask().catch(error => {
-        console.warn(
+        logWarning(
           "Failed to register background notification task",
           getErrorMessage(error),
         );
@@ -81,7 +83,7 @@ function App() {
 
     const pollCurrentContext = () => {
       LotideNotificationPoller.pollNotificationsNow(ctx).catch(error => {
-        console.warn(
+        logWarning(
           "Failed to poll Lotide notifications",
           getErrorMessage(error),
         );
@@ -104,11 +106,27 @@ function App() {
   /* ------------------------------------------------------------------------- */
 
   useEffect(() => {
-    StorageService.lotideContext.query().then(ctx => {
-      if (ctx !== undefined) {
-        dispatch(setCtx(ctx));
-      }
-    });
+    StorageService.lotideContext
+      .query()
+      .then(ctx => {
+        if (ctx !== undefined) {
+          dispatch(setCtx(ctx));
+        }
+      })
+      .catch(error => {
+        logWarning("Failed to load stored Lotide context", getErrorMessage(error));
+      });
+  }, [dispatch]);
+
+  useEffect(() => {
+    StorageService.appSettings
+      .query()
+      .then(settings => {
+        dispatch(setAppSettings(settings));
+      })
+      .catch(error => {
+        logWarning("Failed to load app settings", getErrorMessage(error));
+      });
   }, [dispatch]);
 
   /* ------------------------------------------------------------------------- */
@@ -122,13 +140,16 @@ function App() {
 
     const applyContextSafely = (nextCtx: LotideContext) => {
       applyNewContext(nextCtx).catch(error => {
-        console.warn("Failed to persist Lotide context", getErrorMessage(error));
+        logWarning("Failed to persist Lotide context", getErrorMessage(error));
       });
     };
 
     const expireLogin = () => {
       StorageService.lotideContextKV
         .logout(ctx)
+        .catch(error => {
+          logWarning("Failed to expire saved Lotide login", getErrorMessage(error));
+        })
         .then(() => {
           if (!isActive) return;
 
@@ -136,9 +157,6 @@ function App() {
             apiUrl: ctx.apiUrl,
             apiVersion: ctx.apiVersion,
           });
-        })
-        .catch(error => {
-          console.warn("Failed to expire stored Lotide login", getErrorMessage(error));
         });
     };
 
@@ -180,7 +198,7 @@ function App() {
           return;
         }
 
-        console.warn("Failed to refresh Lotide profile", getErrorMessage(e));
+        logWarning("Failed to refresh Lotide profile", getErrorMessage(e));
       });
     }
 
@@ -210,9 +228,11 @@ function App() {
 */
 export default function AppRoot() {
   return (
-    <Provider store={reduxStore}>
-      <App />
-    </Provider>
+    <AppErrorBoundary>
+      <Provider store={reduxStore}>
+        <App />
+      </Provider>
+    </AppErrorBoundary>
   );
 }
 

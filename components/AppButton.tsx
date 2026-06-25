@@ -42,6 +42,7 @@ export interface AppButtonProps {
   disabled?: boolean;
   fullWidth?: boolean;
   style?: StyleProp<ViewStyle>;
+  testID?: string;
   textColor?: ColorValue;
   textStyle?: StyleProp<TextStyle>;
 }
@@ -54,6 +55,7 @@ export default function AppButton({
   disabled = false,
   fullWidth = false,
   style,
+  testID,
   textColor,
   textStyle,
 }: AppButtonProps) {
@@ -72,6 +74,7 @@ export default function AppButton({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
+      testID={testID}
       style={({ pressed }) => [
         styles.root,
         fullWidth ? styles.fullWidth : undefined,

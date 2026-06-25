@@ -174,6 +174,8 @@ const LoadedItem = ({ postId, post }: { postId: PostId; post: Post }) => {
       style={{ borderBottomWidth: 8, borderColor: theme.secondaryBackground }}
     >
       <Pressable
+        accessibilityLabel={`Open post ${post.title}`}
+        accessibilityRole="button"
         style={{
           width: "100%",
           ...(Platform.OS === "web" ? { cursor: "pointer" } : {}),

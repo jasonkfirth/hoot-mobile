@@ -1,7 +1,25 @@
-/**
- * Learn more about using TypeScript with React Navigation:
- * https://reactnavigation.org/docs/typescript/
- */
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: types.tsx
+
+    Purpose:
+
+        Define React Navigation route and screen prop types.
+
+    Responsibilities:
+
+        - Describe root stack and tab route parameters
+        - Register the app route map with React Navigation's global types
+        - Export screen prop helper types used by Hoot screens
+
+    This file intentionally does NOT contain:
+
+        - navigation component setup
+        - deep-link path mapping
+        - Lotide API response shapes
+*/
 
 import { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import {
@@ -25,6 +43,7 @@ export type RootStackParamList = {
   NotFound: undefined;
   Comment: {
     id: number;
+    postId?: PostId;
     title?: string;
     html: string;
     type: "post" | "comment";
@@ -83,3 +102,5 @@ export type RootTabScreenProps<Screen extends keyof RootTabParamList> =
     BottomTabScreenProps<RootTabParamList, Screen>,
     NativeStackScreenProps<RootStackParamList>
   >;
+
+/* end of types.tsx */

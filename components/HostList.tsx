@@ -20,69 +20,159 @@
         - network discovery beyond the seeded list
 */
 
-import React, { useCallback, useEffect, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet } from "react-native";
 import Icon from "@expo/vector-icons/Ionicons";
 import KnownHosts from "../constants/KnownHosts";
 import ActorDisplayComponent from "./ActorDisplay";
 import { Text, TextInput, View } from "./Themed";
+import AppButton from "./AppButton";
 import * as LotideService from "../services/LotideService";
 import useTheme from "../hooks/useTheme";
-import { lotideContextKV } from "../services/StorageService";
+import { lotideContext, lotideContextKV } from "../services/StorageService";
 import { setCtx } from "../slices/lotideSlice";
 import { useDispatch } from "react-redux";
 import ContentDisplay from "./ContentDisplay";
 import RetryState from "./RetryState";
 import { MINIMUM_LOTIDE_API_VERSION } from "../constants/LotideApi";
 import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
+import { getErrorMessage } from "../utils/error";
 
 export interface HostListProps {
   onSelect: (domain: string, name?: string, username?: string) => void;
 }
 
-interface HostData {
+export interface HostData {
   name: string;
   domain: string;
   instanceInfo?: InstanceInfo | null;
 }
 
+export function updateKnownHostInstanceInfo(
+  hosts: HostData[],
+  domain: string,
+  instanceInfo: HostData["instanceInfo"],
+): HostData[] {
+  return hosts.map(hostData =>
+    domain !== hostData.domain
+      ? hostData
+      : {
+        name: hostData.name,
+        domain: hostData.domain,
+        instanceInfo,
+      },
+  );
+}
+
+export function normalizeHostDomain(input: string): string {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return "";
+
+  const withoutScheme = trimmed.replace(/^https?:\/\//, "");
+  const host = withoutScheme.split(/[/?#]/)[0];
+
+  return host.replace(/\/+$/, "");
+}
+
 export default function HostList(props: HostListProps) {
   const [hostText, setHostText] = useState("");
-  const [knownHosts, setKnowHosts] = useState<HostData[]>(KnownHosts);
+  const [knownHosts, setKnownHosts] = useState<HostData[]>(KnownHosts);
   const [existingProfiles, setExistingProfiles] = useState<
     [string, LotideContext][]
   >([]);
+  const [activatingProfileKey, setActivatingProfileKey] = useState<string | null>(
+    null,
+  );
+  const mountedRef = useRef(true);
+  const activatingProfileKeyRef = useRef<string | null>(null);
+  const hostRequestIdsRef = useRef<Record<string, number>>({});
+  const nextHostRequestIdRef = useRef(0);
   const theme = useTheme();
   const dispatch = useDispatch();
 
-  const loadKnownHostInfo = useCallback((host: HostData, index: number) => {
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const activateExistingProfile = useCallback(
+    (profileKey: string, ctx: LotideContext) => {
+      if (activatingProfileKeyRef.current !== null) return;
+
+      activatingProfileKeyRef.current = profileKey;
+      setActivatingProfileKey(profileKey);
+
+      lotideContextKV
+        .store(ctx)
+        .then(() => lotideContext.store(ctx))
+        .then(() => {
+          if (
+            mountedRef.current &&
+            activatingProfileKeyRef.current === profileKey
+          ) {
+            dispatch(setCtx(ctx));
+          }
+        })
+        .catch(error => {
+          if (
+            mountedRef.current &&
+            activatingProfileKeyRef.current === profileKey
+          ) {
+            Alert.alert("Cannot switch account", getErrorMessage(error));
+          }
+        })
+        .finally(() => {
+          if (activatingProfileKeyRef.current !== profileKey) return;
+
+          activatingProfileKeyRef.current = null;
+
+          if (mountedRef.current) {
+            setActivatingProfileKey(null);
+          }
+        });
+    },
+    [dispatch],
+  );
+
+  const loadKnownHostInfo = useCallback((host: HostData) => {
+    const requestId = nextHostRequestIdRef.current + 1;
+    nextHostRequestIdRef.current = requestId;
+    hostRequestIdsRef.current[host.domain] = requestId;
+
+    if (mountedRef.current) {
+      setKnownHosts(hosts =>
+        updateKnownHostInstanceInfo(hosts, host.domain, undefined),
+      );
+    }
+
     LotideService.getInstanceInfo({
       apiUrl: `https://${host.domain}/api/unstable`,
     })
       .then(instanceInfo => {
-        setKnowHosts(hosts =>
-          hosts.map((hostData, hostIndex) =>
-            index !== hostIndex
-              ? hostData
-              : {
-                name: hostData.name,
-                domain: hostData.domain,
-                instanceInfo,
-              },
-          ),
+        if (
+          !mountedRef.current ||
+          hostRequestIdsRef.current[host.domain] !== requestId
+        ) {
+          return;
+        }
+
+        setKnownHosts(hosts =>
+          updateKnownHostInstanceInfo(hosts, host.domain, instanceInfo),
         );
       })
       .catch(() => {
-        setKnowHosts(hosts =>
-          hosts.map((hostData, hostIndex) =>
-            index !== hostIndex
-              ? hostData
-              : {
-                name: hostData.name,
-                domain: hostData.domain,
-                instanceInfo: null,
-              },
-          ),
+        if (
+          !mountedRef.current ||
+          hostRequestIdsRef.current[host.domain] !== requestId
+        ) {
+          return;
+        }
+
+        setKnownHosts(hosts =>
+          updateKnownHostInstanceInfo(hosts, host.domain, null),
         );
       });
   }, []);
@@ -92,13 +182,39 @@ export default function HostList(props: HostListProps) {
   }, [loadKnownHostInfo]);
 
   useEffect(() => {
+    let isCurrent = true;
+
     lotideContextKV
       .getStore()
       .then(object => Object.entries(object))
-      .then(setExistingProfiles);
+      .then(profiles => {
+        if (isCurrent && mountedRef.current) {
+          setExistingProfiles(profiles);
+        }
+      })
+      .catch(error => {
+        if (isCurrent && mountedRef.current) {
+          Alert.alert("Cannot load saved profiles", getErrorMessage(error));
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
   }, []);
 
-  const renderItem = ({ item, index }: { item: HostData; index: number }) => {
+  const selectCustomHost = () => {
+    const domain = normalizeHostDomain(hostText);
+
+    if (!domain) {
+      Alert.alert("Enter a host", "Type a Lotide host domain before continuing.");
+      return;
+    }
+
+    props.onSelect(domain);
+  };
+
+  const renderItem = ({ item }: { item: HostData }) => {
     const enabled =
       (item.instanceInfo?.apiVersion || 0) >= MINIMUM_LOTIDE_API_VERSION;
     const color = enabled ? theme.text : theme.secondaryText;
@@ -157,7 +273,7 @@ export default function HostList(props: HostListProps) {
             compact
             actionLabel="Retry host"
             message="Failed to load info"
-            onRetry={() => loadKnownHostInfo(item, index)}
+            onRetry={() => loadKnownHostInfo(item)}
             style={styles.hostRetry}
           />
         ) : null}
@@ -173,6 +289,8 @@ export default function HostList(props: HostListProps) {
       {existingProfiles.map(p => {
         const [username, url] = p[0].split("@");
         const isUnlocked = !!p[1].login;
+        const isActivating = activatingProfileKey === p[0];
+        const isProfileActionDisabled = activatingProfileKey !== null;
         const color = isUnlocked ? theme.text : theme.secondaryText;
         const host = url
           .replace("http://", "")
@@ -184,9 +302,14 @@ export default function HostList(props: HostListProps) {
             key={p[0]}
             accessibilityLabel={`Select profile ${username}@${host}`}
             accessibilityRole="button"
+            accessibilityState={{
+              busy: isActivating,
+              disabled: isProfileActionDisabled,
+            }}
+            disabled={isProfileActionDisabled}
             onPress={() => {
               if (isUnlocked) {
-                dispatch(setCtx(p[1]));
+                activateExistingProfile(p[0], p[1]);
               } else {
                 props.onSelect(host.toLowerCase(), undefined, username);
               }
@@ -196,6 +319,7 @@ export default function HostList(props: HostListProps) {
               flexDirection: "row",
               alignItems: "center",
               minHeight: MINIMUM_TOUCH_TARGET_SIZE,
+              opacity: isProfileActionDisabled && !isActivating ? 0.6 : 1,
             }}
           >
             <Icon
@@ -221,7 +345,7 @@ export default function HostList(props: HostListProps) {
                 fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
               }}
             >
-              {hostName}
+              {isActivating ? "Activating..." : hostName}
             </Text>
           </Pressable>
         );
@@ -236,19 +360,26 @@ export default function HostList(props: HostListProps) {
         style={styles.hostInput}
         value={hostText}
         onChangeText={setHostText}
-        onSubmitEditing={() => props.onSelect(hostText.toLowerCase())}
+        onSubmitEditing={selectCustomHost}
         keyboardType="url"
         returnKeyType="next"
+      />
+      <AppButton
+        title="Continue"
+        onPress={selectCustomHost}
+        fullWidth
+        disabled={!normalizeHostDomain(hostText)}
+        style={styles.continueButton}
       />
       {knownHosts
         .filter(
           x =>
             hostText === "" ||
-            x.domain.includes(hostText.toLowerCase()) ||
-            x.name.toLowerCase().includes(hostText.toLowerCase()),
+            x.domain.includes(normalizeHostDomain(hostText)) ||
+            x.name.toLowerCase().includes(hostText.trim().toLowerCase()),
         )
         .map((item, index) => (
-          <View key={item.domain}>{renderItem({ item, index })}</View>
+          <View key={item.domain}>{renderItem({ item })}</View>
         ))}
     </ScrollView>
   );
@@ -276,6 +407,9 @@ const styles = StyleSheet.create({
     minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingHorizontal: 10,
     paddingVertical: 10,
+  },
+  continueButton: {
+    marginTop: 10,
   },
 });
 

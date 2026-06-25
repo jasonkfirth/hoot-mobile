@@ -20,10 +20,12 @@
         - navigation setup
 */
 
-import { FontAwesome } from '@expo/vector-icons';
-import * as Font from 'expo-font';
-import * as SplashScreen from 'expo-splash-screen';
-import * as React from 'react';
+import { FontAwesome } from "@expo/vector-icons";
+import * as Font from "expo-font";
+import * as SplashScreen from "expo-splash-screen";
+import * as React from "react";
+
+import { logWarning } from "../utils/debugLog";
 
 export default function useCachedResources() {
   const [isLoadingComplete, setLoadingComplete] = React.useState(false);
@@ -35,14 +37,14 @@ export default function useCachedResources() {
 
         await Font.loadAsync({
           ...FontAwesome.font,
-          'space-mono': require('../assets/fonts/SpaceMono-Regular.ttf'),
+          "space-mono": require("../assets/fonts/SpaceMono-Regular.ttf"),
         });
       } catch (e) {
-        console.warn("Failed to load startup resources", e);
+        logWarning("Failed to load startup resources", e);
       } finally {
         setLoadingComplete(true);
         SplashScreen.hideAsync().catch(e => {
-          console.warn("Failed to hide splash screen", e);
+          logWarning("Failed to hide splash screen", e);
         });
       }
     }

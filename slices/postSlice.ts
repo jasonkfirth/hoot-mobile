@@ -64,6 +64,8 @@ export const postSlice = createSlice({
     ) => {
       const p = action.payload;
       const post = state.posts[p.id];
+      if (!post) return;
+
       if (post.your_vote !== p.vote) {
         post.your_vote = p.vote;
         if (p.vote) {

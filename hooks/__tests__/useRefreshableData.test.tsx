@@ -14,6 +14,7 @@
         • Ensure refreshable effects are run once after mount
         • Ensure manual refresh calls trigger a second load
         • Ensure dependency changes trigger a second load
+        • Ensure replaced effects are cleaned up
 
     This file intentionally does NOT contain:
 
@@ -31,7 +32,7 @@ function RenderHookHarness({
   effect,
   deps,
 }: {
-  effect: (stopLoading: () => void) => void;
+  effect: (stopLoading: () => void) => void | (() => void);
   deps: unknown[];
 }) {
   const [isLoading, refresh] = useRefreshableData(effect, deps);
@@ -109,6 +110,67 @@ describe("useRefreshableData", () => {
       expect(screen.getByText("idle")).toBeTruthy();
     });
   });
+
+  test("runs effect cleanup before refresh replacement and unmount", async () => {
+    const cleanup = jest.fn();
+    const mockEffect = jest.fn(() => cleanup);
+
+    const screen = await render(
+      <RenderHookHarness effect={mockEffect} deps={["https://lotide.fbxl.net"]} />,
+    );
+
+    await waitFor(() => {
+      expect(mockEffect).toHaveBeenCalledTimes(1);
+    });
+
+    await fireEvent.press(screen.getByText("refresh"));
+
+    await waitFor(() => {
+      expect(mockEffect).toHaveBeenCalledTimes(2);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+    });
+
+    await act(() => {
+      screen.unmount();
+    });
+
+    expect(cleanup).toHaveBeenCalledTimes(2);
+  });
+
+  test("ignores stopLoading from a replaced effect", async () => {
+    const stopLoadingCallbacks: (() => void)[] = [];
+    const mockEffect = jest.fn((stopLoading: () => void) => {
+      stopLoadingCallbacks.push(stopLoading);
+    });
+
+    const screen = await render(
+      <RenderHookHarness effect={mockEffect} deps={["https://lotide.fbxl.net"]} />,
+    );
+
+    await waitFor(() => {
+      expect(mockEffect).toHaveBeenCalledTimes(1);
+    });
+
+    await fireEvent.press(screen.getByText("refresh"));
+
+    await waitFor(() => {
+      expect(mockEffect).toHaveBeenCalledTimes(2);
+    });
+
+    await act(() => {
+      stopLoadingCallbacks[0]?.();
+    });
+
+    expect(screen.getByText("loading")).toBeTruthy();
+
+    await act(() => {
+      stopLoadingCallbacks[1]?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("idle")).toBeTruthy();
+    });
+  });
 });
 
-/* end of useRefreshableData.test.ts */
+/* end of useRefreshableData.test.tsx */

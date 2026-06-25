@@ -13,6 +13,8 @@
         - Select cached comment data
         - Fetch missing comments
         - Support explicit reload attempts
+        - Ignore stale responses from replaced requests
+        - Ignore responses after the hook unmounts
 
     This file intentionally does NOT contain:
 
@@ -20,7 +22,7 @@
         - post fetching
 */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store/reduxStore";
 import { useLotideCtx } from "./useLotideCtx";
@@ -41,18 +43,45 @@ export default function useComment(
     commentId ? state.comments.comments[commentId] : undefined,
   );
   const ctx = useLotideCtx();
+  const loadKey = `${commentId ?? "none"}:${reloadId}`;
+  const requestScopeKey = [
+    ctx?.apiUrl ?? "",
+    ctx?.login?.token ?? "anonymous",
+    loadKey,
+  ].join("|");
+  const lastRequestedLoadKey = useRef("");
+  const activeRequestKey = useRef("");
 
   useEffect(() => {
-    if (!ctx) return;
-    if (!commentId) return;
-    if (!comment) {
-      LotideService.getComment(ctx, commentId)
-        .then(comments => {
-          dispatch(setCommentMulti(comments));
-        })
-        .catch(() => undefined);
+    if (!ctx || !commentId) {
+      activeRequestKey.current = "";
+      return;
     }
-  }, [comment, commentId, ctx, dispatch, reloadId]);
+
+    if (comment && reloadId === 0) {
+      lastRequestedLoadKey.current = loadKey;
+      activeRequestKey.current = "";
+      return;
+    }
+
+    if (comment && lastRequestedLoadKey.current === loadKey) return;
+
+    lastRequestedLoadKey.current = loadKey;
+    activeRequestKey.current = requestScopeKey;
+
+    LotideService.getComment(ctx, commentId)
+      .then(comments => {
+        if (activeRequestKey.current !== requestScopeKey) return;
+        dispatch(setCommentMulti(comments));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      if (activeRequestKey.current === requestScopeKey) {
+        activeRequestKey.current = "";
+      }
+    };
+  }, [comment, commentId, ctx, dispatch, loadKey, reloadId, requestScopeKey]);
 
   return (
     comment && {

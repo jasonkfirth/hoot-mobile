@@ -13,6 +13,8 @@
         - Select cached post data
         - Fetch missing posts
         - Support explicit reload attempts
+        - Ignore stale responses from replaced requests
+        - Ignore responses after the hook unmounts
 
     This file intentionally does NOT contain:
 
@@ -20,7 +22,7 @@
         - comment loading
 */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../store/reduxStore";
 import * as LotideService from "../services/LotideService";
@@ -36,17 +38,45 @@ export default function usePost(
   const post: Post | undefined = useSelector(
     (state: RootState) => state.posts.posts[postId],
   );
+  const loadKey = `${postId}:${reloadId}`;
+  const requestScopeKey = [
+    ctx?.apiUrl ?? "",
+    ctx?.login?.token ?? "anonymous",
+    loadKey,
+  ].join("|");
+  const lastRequestedLoadKey = useRef("");
+  const activeRequestKey = useRef("");
 
   useEffect(() => {
-    if (!ctx) return;
-    if (!post) {
-      LotideService.getPost(ctx, postId)
-        .then(post => {
-          dispatch(setPost({ post }));
-        })
-        .catch(() => null);
+    if (!ctx) {
+      activeRequestKey.current = "";
+      return;
     }
-  }, [ctx, dispatch, post, postId, reloadId]);
+
+    if (post && reloadId === 0) {
+      lastRequestedLoadKey.current = loadKey;
+      activeRequestKey.current = "";
+      return;
+    }
+
+    if (post && lastRequestedLoadKey.current === loadKey) return;
+
+    lastRequestedLoadKey.current = loadKey;
+    activeRequestKey.current = requestScopeKey;
+
+    LotideService.getPost(ctx, postId)
+      .then(post => {
+        if (activeRequestKey.current !== requestScopeKey) return;
+        dispatch(setPost({ post }));
+      })
+      .catch(() => null);
+
+    return () => {
+      if (activeRequestKey.current === requestScopeKey) {
+        activeRequestKey.current = "";
+      }
+    };
+  }, [ctx, dispatch, loadKey, post, postId, reloadId, requestScopeKey]);
 
   return post;
 }

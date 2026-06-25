@@ -25,7 +25,7 @@
  * https://reactnavigation.org/docs/getting-started
  *
  */
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import Icon from "@expo/vector-icons/Ionicons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
@@ -42,6 +42,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from "react-native";
+import { useDispatch, useSelector } from "react-redux";
 
 import Colors from "../constants/Colors";
 import useColorScheme, { AppColorScheme } from "../hooks/useColorScheme";
@@ -50,6 +51,8 @@ import {
   RootStackScreenProps,
   RootTabParamList,
 } from "../types";
+import { RootState } from "../store/reduxStore";
+import { setActiveFeedSort } from "../slices/settingsSlice";
 import LinkingConfiguration from "./LinkingConfiguration";
 
 import FeedScreen from "../screens/FeedScreen";
@@ -98,6 +101,56 @@ const drawerSortIcons: Record<SortOption, SortIconName> = {
   new: "time-outline",
   top: "arrow-up-outline",
 };
+
+function normalizeSortForServer(
+  sort: SortOption,
+  supportsTop: boolean,
+): SortOption {
+  if (!supportsTop && sort === "top") return "hot";
+
+  return sort;
+}
+
+function useFeedSort(
+  navigation: RootNavigation,
+  supportsTop: boolean,
+): {
+  safeSort: SortOption;
+  changeSort: (requestedSort: SortOption) => void;
+} {
+  const dispatch = useDispatch();
+  const activeFeedSort = useSelector(
+    (state: RootState) => state.settings.activeFeedSort,
+  );
+  const safeSort = normalizeSortForServer(activeFeedSort, supportsTop);
+  const previousSafeSort = useRef<SortOption>(safeSort);
+
+  /*
+      The saved preference and the current feed sort are separate.  Header sort
+      changes should affect the visible feed immediately without rewriting what
+      the app should use on the next launch.
+  */
+  useEffect(() => {
+    if (previousSafeSort.current === safeSort) return;
+
+    previousSafeSort.current = safeSort;
+    navigation.navigate("FeedScreen", { sort: safeSort });
+  }, [navigation, safeSort]);
+
+  const changeSort = useCallback(
+    (requestedSort: SortOption) => {
+      dispatch(setActiveFeedSort(
+        normalizeSortForServer(requestedSort, supportsTop),
+      ));
+    },
+    [dispatch, supportsTop],
+  );
+
+  return {
+    safeSort,
+    changeSort,
+  };
+}
 
 export default function Navigation({
   colorScheme,
@@ -262,13 +315,12 @@ function RootNavigator() {
 const BottomTab = createBottomTabNavigator<RootTabParamList>();
 
 function BottomTabNavigator({ navigation }: { navigation: RootNavigation }) {
-  const [sort, setSort] = useState<SortOption>("hot");
   const ctx = useLotideCtx();
   const colorScheme = useColorScheme();
   const supportsTop = (ctx?.apiVersion || 0) >= 10;
   const supportsSources = supportsCollectionTargets(ctx?.apiVersion);
   const supportsMessages = supportsPrivateMessages(ctx?.apiVersion);
-  const safeSort: SortOption = supportsTop ? sort : "hot";
+  const { safeSort, changeSort } = useFeedSort(navigation, supportsTop);
 
   const sortMenu = [
     safeSort,
@@ -278,12 +330,6 @@ function BottomTabNavigator({ navigation }: { navigation: RootNavigation }) {
   ].filter(
     (value, i, arr): value is SortOption => arr.indexOf(value) === i,
   );
-
-  const changeSort = (requestedSort: SortOption) => {
-    const nextSort = !supportsTop && requestedSort === "top" ? "hot" : requestedSort;
-    setSort(nextSort);
-    navigation.navigate("FeedScreen", { sort: nextSort });
-  };
 
   return (
     <BottomTab.Navigator
@@ -422,11 +468,12 @@ function BottomTabNavigator({ navigation }: { navigation: RootNavigation }) {
 const Drawer = createDrawerNavigator<RootTabParamList>();
 
 function DrawerNavigator({ navigation }: { navigation: RootNavigation }) {
-  const [sort, setSort] = useState<SortOption>("hot");
   const ctx = useLotideCtx();
   const colorScheme = useColorScheme();
+  const supportsTop = (ctx?.apiVersion || 0) >= 10;
   const supportsSources = supportsCollectionTargets(ctx?.apiVersion);
   const supportsMessages = supportsPrivateMessages(ctx?.apiVersion);
+  const { safeSort, changeSort } = useFeedSort(navigation, supportsTop);
 
   return (
     <Drawer.Navigator
@@ -440,7 +487,7 @@ function DrawerNavigator({ navigation }: { navigation: RootNavigation }) {
       <Drawer.Screen
         name="FeedScreen"
         component={FeedScreen}
-        initialParams={{ sort }}
+        initialParams={{ sort: safeSort }}
         options={({ navigation }) => ({
           title: "Hoot",
           drawerIcon: ({ color }) => (
@@ -455,11 +502,9 @@ function DrawerNavigator({ navigation }: { navigation: RootNavigation }) {
                 const sortSwitch: Record<SortOption, SortOption> = {
                   top: "hot",
                   hot: "new",
-                  new: (ctx?.apiVersion || 0) < 10 ? "hot" : "top",
+                  new: supportsTop ? "top" : "hot",
                 };
-                const newSort: SortOption = sortSwitch[sort];
-                setSort(newSort);
-                navigation.navigate("FeedScreen", { sort: newSort });
+                changeSort(sortSwitch[safeSort]);
               }}
               style={({ pressed }) => [
                 styles.headerIconButton,
@@ -467,7 +512,7 @@ function DrawerNavigator({ navigation }: { navigation: RootNavigation }) {
               ]}
             >
               <Icon
-                name={drawerSortIcons[sort]}
+                name={drawerSortIcons[safeSort]}
                 size={25}
                 color={Colors[colorScheme].tint}
               />

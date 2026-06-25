@@ -12,6 +12,7 @@
 
         - Track refresh requests
         - Protect state updates after unmount
+        - Run caller cleanup when refresh/dependency changes replace a load
         - Expose a reusable refreshing flag
 
     This file intentionally does NOT contain:
@@ -20,10 +21,15 @@
         - Redux storage
 */
 
-import { useState, useEffect, useRef } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
+
+type RefreshEffectCleanup = () => void;
+type RefreshEffect = (
+  stopLoading: () => void,
+) => void | RefreshEffectCleanup;
 
 export function useRefreshableData(
-  effect: (stopLoading: () => void) => void | (() => void | undefined),
+  effect: RefreshEffect,
   deps: unknown[],
 ): [boolean, () => void] {
   const [refreshCount, setRefreshCount] = useState(0);
@@ -37,18 +43,20 @@ export function useRefreshableData(
 
   useEffect(() => {
     let isActive = true;
-    effectRef.current(() => {
+    const cleanup = effectRef.current(() => {
       if (isActive) setIsLoading(false);
     });
+
     return () => {
       isActive = false;
+      cleanup?.();
     };
   }, [refreshCount, depsKey]);
 
-  function refresh() {
+  const refresh = useCallback(() => {
     setRefreshCount(c => c + 1);
     setIsLoading(true);
-  }
+  }, []);
 
   return [isLoading, refresh];
 }

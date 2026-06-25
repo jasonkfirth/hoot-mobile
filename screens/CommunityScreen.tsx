@@ -20,7 +20,7 @@
         - new post composition
 */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Alert, FlatList, Pressable, StyleSheet } from "react-native";
 import AppButton from "../components/AppButton";
 import { View, Text } from "../components/Themed";
@@ -236,35 +236,82 @@ const ListHeader = React.memo(function ListHeader(props: ListHeaderProps) {
   const onRetryCommunity = props.onRetryCommunity;
   const setReloadId = props.setReloadId;
   const ctx = useLotideCtx();
+  const [isFollowActionPending, setIsFollowActionPending] = useState(false);
+  const isMountedRef = useRef(true);
+  const followActionPendingRef = useRef(false);
 
   const isFollowing = community.your_follow?.accepted || false;
 
-  function follow() {
-    if (!ctx) return;
-    LotideService.followCommunity(ctx, community.id)
-      .then(data => {
-        if (data.accepted === false) {
-          Alert.alert(
-            "Follow request not accepted yet.",
-            "This can happen while the other node is still processing it.",
-          );
-        }
-        setReloadId(x => x + 1);
-      })
-      .catch(() => {
-        Alert.alert("Failed to follow community");
-      });
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      followActionPendingRef.current = false;
+    };
+  }, []);
+
+  function alertIfMounted(title: string, message?: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
   }
 
-  function unfollow() {
-    if (!ctx) return;
-    LotideService.unfollowCommunity(ctx, community.id)
-      .then(() => {
+  function startFollowAction() {
+    if (followActionPendingRef.current) return false;
+
+    followActionPendingRef.current = true;
+    setIsFollowActionPending(true);
+    return true;
+  }
+
+  function finishFollowAction() {
+    followActionPendingRef.current = false;
+
+    if (isMountedRef.current) {
+      setIsFollowActionPending(false);
+    }
+  }
+
+  async function follow() {
+    if (!ctx?.login) return;
+    if (!startFollowAction()) return;
+
+    try {
+      const data = await LotideService.followCommunity(ctx, community.id);
+
+      if (!isMountedRef.current) return;
+
+      if (data.accepted === false) {
+        alertIfMounted(
+          "Follow request not accepted yet.",
+          "This can happen while the other node is still processing it.",
+        );
+      }
+
+      if (isMountedRef.current) {
         setReloadId(x => x + 1);
-      })
-      .catch(() => {
-        Alert.alert("Failed to unfollow community");
-      });
+      }
+    } catch {
+      alertIfMounted("Failed to follow community");
+    } finally {
+      finishFollowAction();
+    }
+  }
+
+  async function unfollow() {
+    if (!ctx?.login) return;
+    if (!startFollowAction()) return;
+
+    try {
+      await LotideService.unfollowCommunity(ctx, community.id);
+
+      if (isMountedRef.current) {
+        setReloadId(x => x + 1);
+      }
+    } catch {
+      alertIfMounted("Failed to unfollow community");
+    } finally {
+      finishFollowAction();
+    }
   }
 
   return (
@@ -305,7 +352,7 @@ const ListHeader = React.memo(function ListHeader(props: ListHeaderProps) {
           />
         ) : null}
       </View>
-      {!!ctx && (
+      {!!ctx?.login && (
         <View style={[styles.buttons]}>
           <AppButton
             onPress={() => navigation.navigate("NewPostScreen", { community })}
@@ -327,18 +374,24 @@ const ListHeader = React.memo(function ListHeader(props: ListHeaderProps) {
           )}
           {isFollowing ? (
             <AppButton
-              onPress={unfollow}
-              title="Unfollow"
+              onPress={() => {
+                void unfollow();
+              }}
+              title={isFollowActionPending ? "Unfollowing..." : "Unfollow"}
               color={theme.secondaryTint}
               accessibilityLabel="Stop seeing posts from this community"
+              disabled={isFollowActionPending}
               style={styles.headerButton}
             />
           ) : (
             <AppButton
-              onPress={follow}
-              title="Follow"
+              onPress={() => {
+                void follow();
+              }}
+              title={isFollowActionPending ? "Following..." : "Follow"}
               color={theme.tint}
               accessibilityLabel="See posts from this community in your feed"
+              disabled={isFollowActionPending}
               style={styles.headerButton}
             />
           )}

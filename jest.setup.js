@@ -13,6 +13,7 @@
 
         • Mock AsyncStorage before app modules import StorageService
         • Mock VirtualizedList with a synchronous renderer for unit tests
+        • Preserve list refresh props so pull-to-refresh tests inspect them
         • Keep FlatList-based screen tests free of asynchronous act warnings
 
     This file intentionally does NOT contain:
@@ -146,6 +147,7 @@ jest.mock("expo-task-manager", () => ({
 
 jest.mock("@react-native/virtualized-lists/Lists/VirtualizedList", () => {
   const React = require("react");
+  const { View } = require("react-native");
 
   function renderOptionalComponent(component) {
     if (!component) return null;
@@ -163,6 +165,10 @@ jest.mock("@react-native/virtualized-lists/Lists/VirtualizedList", () => {
     renderItem,
     ListHeaderComponent,
     ListEmptyComponent,
+    onEndReached,
+    onRefresh,
+    refreshing,
+    testID,
   }) {
     const itemCount = getItemCount ? getItemCount(data) : data?.length || 0;
     const items = [];
@@ -179,8 +185,13 @@ jest.mock("@react-native/virtualized-lists/Lists/VirtualizedList", () => {
     }
 
     return React.createElement(
-      React.Fragment,
-      null,
+      View,
+      {
+        onEndReached,
+        onRefresh,
+        refreshing,
+        testID,
+      },
       renderOptionalComponent(ListHeaderComponent),
       itemCount > 0 ? items : renderOptionalComponent(ListEmptyComponent),
     );

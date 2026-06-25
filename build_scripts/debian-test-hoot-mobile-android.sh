@@ -7,21 +7,21 @@
 #
 # Purpose:
 #
-#     Automates the setup of an Android emulator and the installation
-#     of a built APK for testing purposes on Debian-based systems.
+#     Automates Android emulator setup and release APK smoke validation
+#     for Debian-based systems.
 #
 # Responsibilities:
 #
 #     • Verify the existence of a built APK
-#     • Install emulator dependencies (KVM, system images)
+#     • Optionally install host emulator dependencies when explicitly requested
 #     • Create and start a Virtual Device (AVD)
 #     • Install the APK onto the running emulator via ADB
-#     • Launch the application for visual verification
+#     • Launch the application and fail on fresh crash output
 #
 # This file intentionally does not contain:
 #
 #     • APK building logic (see debian-build-hoot-mobile-android.sh)
-#     • Automated UI test execution
+#     • Automated UI interaction beyond startup smoke validation
 
 # -------------------------------------------------------------------------
 # Fail on errors and surface failures in pipelines
@@ -58,6 +58,7 @@ fi
 AVD_NAME="HootTest"
 AVD_IMAGE="system-images;android-34;google_apis;x86_64"
 EMULATOR_PACKAGES="qemu-system-x86 libvirt-daemon-system libvirt-clients bridge-utils"
+INSTALL_EMULATOR_DEPS="${HOOT_MOBILE_INSTALL_EMULATOR_DEPS:-0}"
 DEFAULT_APK_PATHS=(
   "android/app/build/outputs/apk/release/app-release-unsigned.apk"
   "android/app/build/outputs/apk/release/app-release.apk"
@@ -82,6 +83,22 @@ run_root_cmd() {
 
   log "Skipping root command: $*"
   log "If you're running without sudo access, install these packages manually first: $EMULATOR_PACKAGES"
+}
+
+maybe_install_emulator_dependencies() {
+  if ! command_exists apt-get; then
+    return 0
+  fi
+
+  if [ "$INSTALL_EMULATOR_DEPS" != "1" ]; then
+    log "Skipping host emulator dependency installation."
+    log "Set HOOT_MOBILE_INSTALL_EMULATOR_DEPS=1 to run apt-get for: $EMULATOR_PACKAGES"
+    return 0
+  fi
+
+  log "Installing emulator dependencies..."
+  run_root_cmd apt-get update
+  run_root_cmd apt-get install -y $EMULATOR_PACKAGES
 }
 
 resolve_sdk_tools() {
@@ -139,6 +156,7 @@ ensure_avd_image() {
 
 resolve_avd_home() {
   local avd_path=""
+  local xdg_config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 
   if [ -n "${ANDROID_AVD_HOME:-}" ] && [ -d "$ANDROID_AVD_HOME" ]; then
     export ANDROID_AVD_HOME
@@ -157,8 +175,8 @@ resolve_avd_home() {
 
   if [ -n "$avd_path" ]; then
     ANDROID_AVD_HOME=$(dirname "$avd_path")
-  elif [ -n "${XDG_CONFIG_HOME:-}" ] && [ -d "$XDG_CONFIG_HOME/.android/avd" ]; then
-    ANDROID_AVD_HOME="$XDG_CONFIG_HOME/.android/avd"
+  elif [ -d "$xdg_config_home/.android/avd" ]; then
+    ANDROID_AVD_HOME="$xdg_config_home/.android/avd"
   else
     ANDROID_AVD_HOME="$HOME/.android/avd"
   fi
@@ -181,7 +199,12 @@ show_emulator_log_tail() {
 
 wait_for_adb_device() {
   for _ in $(seq 1 60); do
-    if "$ADB" get-state >/dev/null 2>&1; then
+    EMULATOR_SERIAL=$(
+      "$ADB" devices |
+        awk '$1 ~ /^emulator-/ && $2 == "device" { print $1; exit }'
+    )
+
+    if [ -n "$EMULATOR_SERIAL" ]; then
       return 0
     fi
 
@@ -200,6 +223,32 @@ wait_for_adb_device() {
 }
 
 EMULATOR_PID=""
+EMULATOR_SERIAL=""
+
+start_emulator() {
+  local emulator_args=(
+    -avd "$AVD_NAME"
+    -no-audio
+    -no-window
+    -no-snapshot
+    -gpu off
+  )
+
+  if [ "${HOOT_MOBILE_KEEP_EMULATOR:-0}" = "1" ]; then
+    # A kept emulator must survive the test shell exiting.  setsid detaches it
+    # from this process group, while nohup and /dev/null protect it from a
+    # closed parent stdin/stdout during long follow-up ADB sessions.
+    if command_exists setsid; then
+      nohup setsid "$EMULATOR_BIN" "${emulator_args[@]}" > /tmp/hoot-mobile-emulator.log 2>&1 < /dev/null &
+    else
+      nohup "$EMULATOR_BIN" "${emulator_args[@]}" > /tmp/hoot-mobile-emulator.log 2>&1 < /dev/null &
+    fi
+  else
+    "$EMULATOR_BIN" "${emulator_args[@]}" > /tmp/hoot-mobile-emulator.log 2>&1 &
+  fi
+
+  EMULATOR_PID=$!
+}
 
 cleanup_emulator() {
   if [ -z "$EMULATOR_PID" ]; then
@@ -245,11 +294,7 @@ fi
 
 cd "$PROJECT_ROOT"
 
-if command_exists apt-get; then
-  log "Installing emulator dependencies..."
-  run_root_cmd apt-get update
-  run_root_cmd apt-get install -y $EMULATOR_PACKAGES
-fi
+maybe_install_emulator_dependencies
 
 if [ ! -x "$SDKMANAGER" ] || [ ! -x "$AVDMANAGER" ] || [ ! -x "$ADB" ]; then
   log "Error: Android command-line tools not installed or not available in $ANDROID_HOME_DIR."
@@ -289,13 +334,7 @@ if [ ! -x "$EMULATOR_BIN" ]; then
   exit 1
 fi
 
-if [ "${HOOT_MOBILE_KEEP_EMULATOR:-0}" = "1" ]; then
-  nohup "$EMULATOR_BIN" -avd "$AVD_NAME" -no-audio -no-window -no-snapshot -gpu off > /tmp/hoot-mobile-emulator.log 2>&1 &
-else
-  "$EMULATOR_BIN" -avd "$AVD_NAME" -no-audio -no-window -no-snapshot -gpu off > /tmp/hoot-mobile-emulator.log 2>&1 &
-fi
-
-EMULATOR_PID=$!
+start_emulator
 
 log "Waiting for emulator to boot..."
 wait_for_adb_device
@@ -308,7 +347,7 @@ for _ in $(seq 1 75); do
     exit 1
   fi
 
-  BOOT_COMPLETED=$("$ADB" shell getprop sys.boot_completed | tr -d '\r')
+  BOOT_COMPLETED=$("$ADB" -s "$EMULATOR_SERIAL" shell getprop sys.boot_completed | tr -d '\r')
   if [ "$BOOT_COMPLETED" = "1" ]; then
     break
   fi
@@ -321,12 +360,19 @@ if [ "$BOOT_COMPLETED" != "1" ]; then
   exit 1
 fi
 
-log "Installing APK: $APK_PATH"
-"$ADB" install -r "$APK_PATH"
+log "Running Android install and launch smoke test..."
+ANDROID_SERIAL="$EMULATOR_SERIAL" "$PROJECT_ROOT/build_scripts/android-smoke-launch.sh" "$APK_PATH"
 
-log "Launching Hoot Mobile..."
-"$ADB" shell monkey -p org.brokenlamp.hoot -c android.intent.category.LAUNCHER 1
-
-log "Test setup complete. Emulator running with PID $EMULATOR_PID."
+if [ "${HOOT_MOBILE_KEEP_EMULATOR:-0}" = "1" ]; then
+  if "$ADB" -s "$EMULATOR_SERIAL" get-state >/dev/null 2>&1; then
+    log "Android emulator smoke test passed. Emulator remains running as $EMULATOR_SERIAL with PID $EMULATOR_PID."
+  else
+    log "Error: Android smoke test passed, but the kept emulator is no longer visible to ADB."
+    show_emulator_log_tail
+    exit 1
+  fi
+else
+  log "Android emulator smoke test passed."
+fi
 
 # end of debian-test-hoot-mobile-android.sh

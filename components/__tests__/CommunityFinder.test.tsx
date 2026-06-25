@@ -23,7 +23,7 @@
 */
 
 import * as React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider } from "react-redux";
 import configureStoreMock from "redux-mock-store";
 
@@ -53,6 +53,22 @@ const mockStore = configureStoreMock([]);
 
 function renderWithStore(ui: React.ReactElement, ctx: LotideContext = {}) {
   return render(<Provider store={mockStore({ lotide: { ctx } })}>{ui}</Provider>);
+}
+
+function deferred<T>() {
+  let resolveValue: (value: T | PromiseLike<T>) => void = () => undefined;
+  let rejectValue: (reason?: unknown) => void = () => undefined;
+
+  const promise = new Promise<T>((resolve, reject) => {
+    resolveValue = resolve;
+    rejectValue = reject;
+  });
+
+  return {
+    promise,
+    resolve: resolveValue,
+    reject: rejectValue,
+  };
 }
 
 describe("CommunityFinder", () => {
@@ -134,6 +150,34 @@ describe("CommunityFinder", () => {
     });
   });
 
+  test("shows loading while community results are pending", async () => {
+    const request = deferred<Community[]>();
+    mockGetAllCommunities.mockReturnValue(request.promise);
+
+    const screen = await renderWithStore(<CommunityFinder onSelect={() => {}} />, {
+      login: { token: "token-1" },
+    });
+
+    expect(screen.getByText("Loading communities...")).toBeTruthy();
+
+    await act(async () => {
+      request.resolve([
+        {
+          id: 1,
+          name: "lotide",
+          host: "lotide.fbxl.net",
+          local: false,
+        },
+      ]);
+      await request.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading communities...")).toBeNull();
+      expect(screen.getByText("lotide")).toBeTruthy();
+    });
+  });
+
   test("keeps results hidden until typing when requested", async () => {
     const screen = await renderWithStore(
       <CommunityFinder onlyWhenTyping onSelect={() => {}} />,
@@ -153,8 +197,17 @@ describe("CommunityFinder", () => {
     });
   });
 
-  test("does not crash or expose stale rows when community loading fails", async () => {
-    mockGetAllCommunities.mockRejectedValue(new Error("server unavailable"));
+  test("shows a retry action when community loading fails", async () => {
+    mockGetAllCommunities
+      .mockRejectedValueOnce(new Error("server unavailable"))
+      .mockResolvedValueOnce([
+        {
+          id: 1,
+          name: "lotide",
+          host: "lotide.fbxl.net",
+          local: false,
+        },
+      ]);
 
     const screen = await renderWithStore(<CommunityFinder onSelect={() => {}} />, {
       login: { token: "token-1" },
@@ -162,10 +215,33 @@ describe("CommunityFinder", () => {
 
     await waitFor(() => {
       expect(mockGetAllCommunities).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Cannot load communities")).toBeTruthy();
     });
     expect(screen.getByPlaceholderText("Filter communities")).toBeTruthy();
     expect(screen.queryByText("lotide")).toBeNull();
     expect(screen.queryByText("narwhal")).toBeNull();
+
+    await fireEvent.press(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => {
+      expect(mockGetAllCommunities).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("lotide")).toBeTruthy();
+      expect(screen.queryByText("Cannot load communities")).toBeNull();
+    });
+  });
+
+  test("explains empty filtered community results", async () => {
+    const screen = await renderWithStore(<CommunityFinder onSelect={() => {}} />, {
+      login: { token: "token-1" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("lotide")).toBeTruthy();
+    });
+
+    await fireEvent.changeText(screen.getByPlaceholderText("Filter communities"), "zzzz");
+
+    expect(screen.getByText("No matching communities")).toBeTruthy();
   });
 });
 

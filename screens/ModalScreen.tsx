@@ -21,12 +21,13 @@
 */
 
 import Icon from "@expo/vector-icons/Ionicons";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   StyleSheet,
   StatusBar,
   ScrollView,
   Pressable,
+  RefreshControl,
   Share,
 } from "react-native";
 import * as Haptics from "../services/HapticService";
@@ -38,7 +39,10 @@ import CommentsDisplay from "../components/CommentsDisplay";
 import usePost from "../hooks/usePost";
 import RetryState from "../components/RetryState";
 import { useLotideCtx } from "../hooks/useLotideCtx";
-import { MINIMUM_TOUCH_TARGET_SIZE, TOUCH_TARGET_HIT_SLOP } from "../constants/TouchTargets";
+import {
+  MINIMUM_TOUCH_TARGET_SIZE,
+  TOUCH_TARGET_HIT_SLOP,
+} from "../constants/TouchTargets";
 
 export default function ModalScreen({
   navigation,
@@ -46,12 +50,43 @@ export default function ModalScreen({
 }: RootStackScreenProps<"Post" | "Modal">) {
   const postId = route.params.postId;
   const [postReloadId, setPostReloadId] = useState(0);
-  const post = usePost(postId, postReloadId);
-  const [highlightedComments, setHighlightedComments] = useState(
-    route.params.highlightedComments,
+  const [commentReloadId, setCommentReloadId] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
   );
+  const post = usePost(postId, postReloadId);
+  const routeHighlightedComments = route.params.highlightedComments;
+  const highlightedCommentKey = routeHighlightedComments?.join(",") || "";
+  const [dismissedHighlightKey, setDismissedHighlightKey] = useState("");
+  const highlightedComments =
+    highlightedCommentKey && highlightedCommentKey !== dismissedHighlightKey
+      ? routeHighlightedComments
+      : undefined;
+  const effectiveCommentReloadId =
+    commentReloadId + highlightedCommentsReloadId(routeHighlightedComments);
   const theme = useTheme();
   const ctx = useLotideCtx();
+
+  useEffect(() => () => {
+    if (refreshTimer.current) {
+      clearTimeout(refreshTimer.current);
+    }
+  }, []);
+
+  function refreshPostAndComments() {
+    setIsRefreshing(true);
+    setPostReloadId(x => x + 1);
+    setCommentReloadId(x => x + 1);
+
+    if (refreshTimer.current) {
+      clearTimeout(refreshTimer.current);
+    }
+
+    refreshTimer.current = setTimeout(() => {
+      setIsRefreshing(false);
+    }, 900);
+  }
 
   if (!post) {
     return (
@@ -65,7 +100,19 @@ export default function ModalScreen({
   }
 
   return (
-    <ScrollView style={{ backgroundColor: theme.background }}>
+    <ScrollView
+      refreshControl={
+        <RefreshControl
+          colors={[theme.tint]}
+          progressBackgroundColor={theme.secondaryBackground}
+          refreshing={isRefreshing}
+          tintColor={theme.tint}
+          onRefresh={refreshPostAndComments}
+        />
+      }
+      style={{ backgroundColor: theme.background }}
+      testID="post-detail-scroll"
+    >
       <View
         style={{
           ...styles.item,
@@ -85,6 +132,7 @@ export default function ModalScreen({
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               navigation.navigate("Comment", {
                 id: post.id,
+                postId: post.id,
                 title: post.title,
                 html: post.content_html ?? "",
                 type: "post",
@@ -116,7 +164,7 @@ export default function ModalScreen({
           <Pressable
             accessibilityLabel="Show all comments"
             accessibilityRole="button"
-            onPress={() => setHighlightedComments(undefined)}
+            onPress={() => setDismissedHighlightKey(highlightedCommentKey)}
             style={styles.showAllComments}
           >
             <Text style={{ color: theme.tint }}>
@@ -130,11 +178,18 @@ export default function ModalScreen({
           navigation={navigation}
           postId={post.id}
           highlightedComments={highlightedComments}
+          reloadId={effectiveCommentReloadId}
         />
         <View style={{ height: 300 }} />
       </View>
     </ScrollView>
   );
+}
+
+function highlightedCommentsReloadId(ids?: CommentId[]) {
+  if (!ids?.length) return 0;
+
+  return ids.reduce((total, id, index) => total + id * (index + 1), 0);
 }
 
 const styles = StyleSheet.create({

@@ -119,13 +119,42 @@ Response handling and validation:
   * Added a shared utility for converting unknown thrown values into user-safe
     alert messages.
 
+  * Added a shared 30-second timeout to Lotide API requests. Stalled servers or
+    broken network paths now fail through the normal error and retry surfaces
+    instead of leaving screens in an indefinite loading state.
+
+  * Hardened Lotide endpoint URL construction. API base URLs are now trimmed
+    and joined to endpoint paths with exactly one slash, so a saved custom
+    server ending in "/" cannot turn every request into a double-slash URL.
+
+  * Hardened the shared refresh hook so caller cleanup functions run when a
+    refresh, dependency change, or unmount replaces an in-flight load. Stale
+    stop-loading callbacks from replaced loads can no longer clear the active
+    loading state.
+
   * Hardened startup synchronization so transient instance/profile failures no
     longer erase a valid stored login. Explicit authentication failures now
     expire the login while preserving the selected server context.
 
+  * Hardened root startup/session recovery so stored-context read failures are
+    logged through diagnostics instead of becoming unhandled startup promises,
+    and expired logins still clear the active persisted context even if saved
+    account bookkeeping fails.
+
   * Added defensive AsyncStorage parsing for active context and saved account
     records. Corrupt JSON now self-heals to a safe signed-out state instead of
-    crashing startup or the account picker.
+    crashing startup or the account picker. Active contexts and saved profiles
+    now canonicalize Lotide API URLs so legacy trailing-slash profile aliases
+    collapse back to one account row.
+
+  * Added a root React render error boundary. If a screen crashes while
+    rendering, Hoot now shows a touch-friendly recovery view with a retry action
+    instead of leaving the app on a blank or permanently broken render tree.
+
+  * Added centralized diagnostic logging through utils/debugLog.ts. Startup,
+    render-boundary, Lotide request, and background notification warnings/errors
+    now pass through one formatting and failure-isolation point instead of
+    writing directly to console APIs throughout the app.
 
 Notification reliability:
 
@@ -175,9 +204,43 @@ Notification reliability:
     denied OS notification permission, cross-client unseen clearing, and
     first-run old-history suppression.
 
+  * Bounded the per-account notification dedupe cache and made it current-page
+    first. Large notification histories now keep the freshly fetched Lotide
+    notification fingerprints before older local cache entries, preventing
+    background polling from immediately forgetting notifications it just saw.
+
+  * Capped large notification batches so a background poll cannot flood the
+    Android shade with one local alert per backlog item. Hoot now sends a small
+    set of routed individual alerts plus a summary alert that opens the
+    notifications tab for the rest.
+
   * Added an Android-only settings toggle for background notifications and
     updated the settings text to describe OS-controlled background checks
     rather than promising a fixed polling interval.
+
+  * Added Android notification diagnostics to settings. The app now reports
+    local-alert permission status, background-polling availability, background
+    task registration, and exposes a test-notification action that schedules a
+    local alert through the same high-importance Lotide channel.
+
+  * Added blocked-permission recovery for Android notifications. Diagnostics now
+    preserve whether the OS can still be asked for notification permission, and
+    settings offers a direct notification-settings shortcut when Android reports
+    that local alerts are blocked in system settings.
+
+  * Added persisted notification-poll diagnostics. Hoot now records the last
+    poll attempt, last successful poll, last local-alert count, skipped-poll
+    reason, and last poll error so a phone can prove whether the notification
+    path is fetching, scheduling, or failing.
+
+  * Made Android background notification wakes observable when no signed-in
+    account is available. A background task that wakes after logout or before
+    context restoration now records a "signed out" skip reason instead of
+    disappearing from notification diagnostics.
+
+  * Added a settings action to check Lotide notifications immediately. This
+    gives phone testing a direct server-poll path instead of depending only on
+    startup, foreground-resume, or Android's background task window.
 
   * Added notification tap routing for both warm app and cold-start launches.
     Reply notifications now open the related post with the reply highlighted;
@@ -186,6 +249,14 @@ Notification reliability:
   * Added private-message notification support. Lotide 0.18 private-message
     notifications now render in the notification screen, produce local Android
     alerts, and route notification taps directly to the sender conversation.
+
+  * Expanded notification poller coverage for Expo's current cold-start
+    notification response cache and defensive response clearing path.
+
+  * Kept previously loaded notifications visible when a notification-list
+    refresh fails. The screen now shows the reload failure inline above the
+    existing notifications instead of replacing useful notification history
+    with an empty retry state.
 
   * Added a foreground notification handler using the current Expo
     shouldShowBanner and shouldShowList fields.
@@ -197,6 +268,17 @@ Notification reliability:
   * Made task-registration availability part of the user-facing enablement
     transaction. If Android reports background tasks unavailable, the setting is
     left disabled instead of appearing enabled without a registered task.
+
+  * Hardened notification diagnostics in settings so delayed permission or
+    background-task checks are ignored after the user navigates away from the
+    screen. This prevents late Android diagnostics from raising stale alerts or
+    updating an unmounted settings view.
+
+  * Hardened Android notification actions in settings. Manual notification
+    checks, local test notifications, notification toggle changes, and the
+    Android settings shortcut now have synchronous in-flight guards so fast
+    repeated taps cannot schedule duplicate notification work before React
+    disables the visible control.
 
   * Remaining limitation: this is still local polling. If the app is
     user-force-killed, Android and iOS may not run background tasks. True
@@ -225,15 +307,126 @@ Navigation, screens, and flows:
     comment activity from Lotide, including pagination and navigation back to
     related posts.
 
+  * Added pull-to-refresh behavior to private-message inboxes and conversation
+    threads. Failed inbox refreshes now keep the previously visible
+    conversations on screen while surfacing the reload failure.
+
+  * Added paged private-message inbox loading. Conversation lists now request
+    later Lotide pages as the user scrolls, suppress duplicate in-flight page
+    loads, and deduplicate overlapping conversation previews by conversation
+    partner before rows are appended.
+
+  * Added paged private-message thread loading. Longer conversations now expose
+    a touch-friendly "Load earlier messages" action, suppress duplicate
+    in-flight page loads, and deduplicate overlapping message pages by message
+    id.
+
+  * Hardened private-message sending so a server-accepted message is inserted
+    into the visible conversation immediately, even if the follow-up thread
+    reload fails. Failed sends now keep the draft and show the server error
+    message when one is available.
+
+  * Hardened private-message send submission with a synchronous pending guard.
+    Very fast repeated taps on the Send button can no longer submit duplicate
+    messages before React rerenders the disabled state.
+
+  * Hardened private-message thread cleanup so delayed page loads and message
+    sends are ignored after the user leaves the conversation. Failed sends can
+    no longer raise stale alerts from a thread screen that is no longer active.
+
+  * Hardened private-message conversation dismissal. Dismiss buttons now disable
+    while the request is pending, duplicate taps cannot submit duplicate
+    dismissals, accepted dismissals remove the conversation immediately, stale
+    follow-up inbox reloads cannot resurrect the dismissed preview, newer
+    activity from the same sender still reopens the conversation, and delayed
+    failures after leaving the inbox no longer show stale alerts.
+
+  * Added honest pull-to-refresh behavior to the source-feed list. Failed source
+    list refreshes now keep the previously visible feeds on screen and show the
+    reload failure inline.
+
+  * Hardened source-feed follow and unfollow actions from both the feed list
+    and source detail screen. Pending follow changes now disable the active
+    action button, duplicate taps cannot create duplicate requests, and late
+    failures after leaving the source view no longer show stale alerts or
+    trigger dismissed refreshes.
+
+  * Added pull-to-refresh behavior to Lotide 0.18 source-feed detail and source
+    item reader screens. Failed detail/item refreshes now keep the previously
+    visible feed or cached item on screen while showing the reload failure
+    inline.
+
+  * Hardened Lotide 0.18 source-item comment submission so an accepted comment
+    appears in the cached item immediately, even if the follow-up item reload
+    fails. Source-item comments now also prevent duplicate pending submits,
+    ignore delayed submit results after the item reader is dismissed, and keep
+    failed drafts visible with the server error message when one is available.
+
+  * Hardened post/comment voting and Lotide 0.18 source-item likes. Regular
+    post and comment votes now update optimistically, block duplicate pending
+    vote requests, roll back failed mutations, and avoid stale alerts after a
+    voting surface unmounts. Source-feed preview and source-item likes now
+    disable the pending heart action, suppress duplicate like requests, show
+    server error details, and ignore late failures or refreshes after the user
+    leaves the source view.
+
+  * Hardened the regular post/comment reply composer. Replies now submit
+    trimmed text, prevent blank or duplicate submissions, keep drafts on
+    failure, show server error details, ignore delayed submit results after the
+    composer is dismissed, and return to the post with the accepted comment
+    highlighted.
+
+  * Added pull-to-refresh behavior to profile activity timelines. Failed
+    activity refreshes now keep the previously visible activity and profile
+    header on screen while surfacing the reload failure inline.
+
+  * Hardened profile activity pagination. Repeated FlatList end-reaching while
+    a page is already in flight no longer issues duplicate Lotide requests, and
+    overlapping activity pages are deduplicated by activity type and id before
+    rows are appended.
+
+  * Hardened profile follow and unfollow actions on other-user activity
+    screens. Pending user-follow changes now disable the active button,
+    duplicate taps cannot create duplicate requests, and late failures after
+    leaving the profile no longer show stale alerts or trigger dismissed
+    refreshes.
+
   * Added ModerationScreen.tsx to show moderated communities, pending flags,
     flagged posts, flagger information, and flag dismissal.
+
+  * Hardened moderation flag dismissal. Pending dismissals now disable the
+    active action, duplicate taps cannot submit duplicate flag updates, failed
+    dismissals show the server error reason when one is available, delayed
+    dismiss results after leaving the moderation dashboard are ignored, and
+    stale moderation community or flag loads can no longer update a dismissed
+    screen.
 
   * Reworked ProfileScreen to load profile data defensively, render structured
     profile descriptions, link to activity/moderation/settings, and handle
     logout when the stored login user record is missing.
 
+  * Added pull-to-refresh behavior to the signed-in profile screen. Failed
+    profile or followed-community refreshes now keep the previously visible
+    profile data on screen and show the reload failure inline.
+
+  * Hardened profile account switching and logout so the active persisted
+    Lotide context is removed before the UI reports that the account is no
+    longer active. Background notification polling can no longer keep using a
+    locally logged-out account after restart or Android background wake-up.
+
+  * Hardened signed-in profile account actions against repeated taps and stale
+    failures. Switch-account and logout rows now disable while storage or
+    logout work is pending, duplicate logout prompts are ignored, and delayed
+    account-action failures after leaving the profile no longer raise stale
+    alerts.
+
   * Reworked SearchScreen and CommunityFinder so community browsing has Mine
     and Everything tabs backed by the current Lotide community list API.
+
+  * Hardened the shared CommunityFinder picker used by community search and
+    new-post community selection. Slow loads now show an explicit loading
+    state, failed loads show the shared retry control instead of a blank list,
+    and empty filtered results explain that no matching communities were found.
 
   * Added all-page community loading with repeated-cursor detection and a page
     safety limit. Community search, new-post community selection, and the
@@ -242,17 +435,67 @@ Navigation, screens, and flows:
   * Restored dev.narwhal.city to the seeded login host list after checking the
     old GitHub host list against live Lotide instance endpoints.
 
+  * Hardened the first-run host and credential flow. Custom host entry now has
+    a visible Continue action, pasted host URLs are normalized to the host
+    domain before selection, empty host submissions are rejected, login and
+    registration trim user-facing identifiers, and in-flight credential
+    submissions cannot be duplicated.
+
+  * Hardened saved-profile activation and seeded-host probing on the first-run
+    host picker. Stored account rows now disable while an activation is
+    pending, duplicate activation taps are ignored, delayed activation failures
+    after leaving the picker no longer raise stale alerts, saved-profile loads
+    ignore unmounted results, and known-host probe results are applied by
+    domain instead of by the currently visible filtered index.
+
+  * Hardened login and registration cleanup so delayed authentication
+    completions are ignored after the user leaves the credential form. A late
+    successful login can no longer activate a stale account, and a late failure
+    can no longer raise an alert from a dismissed form.
+
+  * Made account activation durable immediately after successful login,
+    registration, or saved-profile selection. The active Lotide context is now
+    written to local storage before Redux reports the account active, so app
+    restart and Android background notification polling see the same account as
+    the visible UI.
+
   * Reworked CommunityScreen so it can load a community by id from deep links,
     render structured descriptions, refresh community metadata, and show retry
     states for community or feed failures.
+
+  * Hardened CommunityScreen follow and unfollow actions. Signed-out readers
+    no longer see community action buttons, pending follow changes disable the
+    action button, duplicate taps cannot create duplicate requests, and late
+    failures after leaving the screen no longer show stale alerts or reload the
+    dismissed community view.
 
   * Reworked FeedScreen, ModalScreen, PostDisplay, and CommentsDisplay to show
     explicit retry/loading states instead of failing silently or crashing when
     posts, comments, authors, or communities are missing.
 
+  * Reworked the NotFound fallback screen to use the app theme and shared
+    touch-friendly button styling instead of a hard-coded white route page.
+
   * Made feed loading key-aware so sort, community, follow-scope, and account
     changes reset visible feed state and stale in-flight requests cannot append
-    into a newer feed.
+    into a newer feed or dispatch after the feed hook unmounts.
+
+  * Made comment pagination deduplicate overlapping server pages so post
+    comments and nested replies do not render duplicate rows when a backend
+    repeats an id across page boundaries.
+
+  * Made comment loading ignore stale in-flight responses and failures so a
+    slow older page load cannot overwrite a newer refresh or nested-reply
+    request, and cannot write into Redux after the comment hook unmounts.
+
+  * Made single post and single comment loading ignore stale responses so older
+    detail loads cannot overwrite a newer reload or write into Redux after the
+    hook unmounts.
+
+  * Added persisted app settings for the default feed sort. Settings now
+    exposes a real Hot/New/Top control, the navigation sort header uses the
+    shared Redux setting, and saved Top preferences degrade to Hot on older
+    servers until the connected API supports Top sorting.
 
   * Split explicit "not in your follows" feed requests from omitted follow
     filters in the feed-state key, and prevented the signed-out feed prompt from
@@ -273,12 +516,41 @@ Navigation, screens, and flows:
     available.
 
   * Reworked SettingsScreen to remove the deprecated react-native-settings-screen
-    dependency and provide an in-app settings UI for the Lotide API URL, static
-    feed-sort display, and Android notification toggle.
+    dependency and provide an in-app settings UI for the Lotide API URL,
+    persisted feed-sort preference, and Android notification toggle.
+
+  * Hardened SettingsScreen saves. API URLs are trimmed and canonicalized before
+    persistence, malformed values are rejected with the same http:// or https://
+    contract shown to users, duplicate save taps are ignored while storage is
+    pending, and the API URL input now exposes an accessibility label.
 
   * Updated NewPostScreen, NewCommunity, EditCommunityScreen, and
     ForgotPasswordScreen for current React Native props, better error messages,
     and safer navigation after successful requests.
+
+  * Hardened NewPostScreen submission so duplicate taps cannot create duplicate
+    post requests, post fields are trimmed before submission, and delayed
+    created-post reloads are ignored after the composer is dismissed.
+
+  * Hardened community creation and editing forms. New community names and
+    descriptions are trimmed before API calls, signed-out users are sent to the
+    login prompt, in-flight create/edit submits are disabled, and a created
+    community still opens when optional description save, follow, or reload work
+    fails after the server has already accepted the community. Delayed
+    create/edit successes and failures are now ignored after the user leaves
+    the form, so stale requests cannot navigate, alert, or update a dismissed
+    screen.
+
+  * Hardened ForgotPasswordScreen as a real mobile reset flow. Email and reset
+    keys are trimmed before API calls, duplicate key/reset submits are blocked,
+    key rejection is shown inline, reset inputs are themed and touch-friendly,
+    and the old developer-only "this shouldn't happen" alert was replaced with
+    recoverable user-facing text.
+
+  * Hardened password-reset cleanup so delayed key requests, key checks, and
+    reset submissions are ignored after the reset screen is dismissed. Late
+    failures can no longer raise stale alerts, and a late reset success can no
+    longer navigate from a screen the user has already left.
 
   * Added user-visible failure handling for vote requests, comment submission,
     post-create reloads, password reset key checks, and password reset submits.
@@ -295,6 +567,26 @@ Rendering, theme, and UI behavior:
     renderers for abbr/details/img, ignore unsafe tags, and open links through
     React Native Linking.
 
+  * Stabilized ContentDisplay's react-native-render-html configuration objects
+    across rerenders so post, comment, and message bodies avoid needless render
+    engine rebuilds while preserving typed renderer styles.
+
+  * Hardened HrefDisplay link previews. External preview links now normalize
+    obvious bare web URLs, direct image previews open from the image itself,
+    unsupported schemes fall back visibly instead of being treated as images,
+    failed platform browser handoffs show the original link, and malformed
+    image dimensions are clamped before they reach layout styles.
+
+  * Centralized external-link opening through utils/externalLink.ts so HTML
+    content, post previews, source feeds, and source items all share the same
+    guarded URL normalization, unsupported-scheme fallback, and platform-open
+    failure handling.
+
+  * Hardened the shared haptic feedback wrapper. Hoot now skips haptics on web,
+    delegates native feedback through one service, and treats native haptic
+    failures as diagnostic-only so a failed vibration cannot become an
+    interaction error.
+
   * Added RetryState.tsx as the shared accessible retry component used by
     feeds, comments, posts, notifications, profiles, moderation, host loading,
     and community loading.
@@ -309,6 +601,11 @@ Rendering, theme, and UI behavior:
   * Added accessibility labels, roles, selected/disabled states, and clearer
     press handling to tabs, host/profile selectors, post/community links, and
     retry actions.
+
+  * Tightened feed and login accessibility semantics. Feed rows now expose a
+    labeled open-post button action, comment rows describe their action-toggle
+    behavior, and static login host headers no longer create fake button
+    targets for assistive technologies.
 
   * Centralized the supported Lotide API version floor so startup checks and the
     known-host picker agree that API version 8 is the minimum supported server
@@ -355,10 +652,20 @@ Dependency and tooling modernization:
     @react-native/jest-preset, @testing-library/react-native, ESLint, Jest
     environment packages, redux-mock-store, and current Node/Jest/React types.
 
+  * Updated the reproducible npm graph within the current Expo SDK 56
+    compatibility range, including uuid 14.0.1 and
+    @testing-library/react-native 14.0.1, current React Navigation 7.x patch
+    releases, and the latest Node ambient type package accepted by the Expo
+    validation gate. The lockfile refresh also pruned peer-only Metro/Babel
+    packages that npm no longer installs for this tree.
+
   * Updated scripts so npm run android and npm run ios use expo run:* native
     builds, npm test runs Jest once by default, npm run test:watch keeps the
     old watch behavior, npm run lint runs ESLint with zero warnings, and
     npm run build:android invokes the Debian Android build script.
+
+  * Added npm run verify:release as the one-command release gate for strict
+    linting, Jest, Expo SDK dependency validation, and npm audit.
 
   * Routed npm run android through build_scripts/android-env.sh so local device
     launches use Java 17, the local Android SDK, and a development NODE_ENV
@@ -381,6 +688,38 @@ Dependency and tooling modernization:
   * Added scripts/check-text-hygiene.js and wired npm run lint:strict to run
     ESLint with unused-disable checks, text hygiene checks for Git-visible
     tracked and untracked files, and TypeScript no-emit validation.
+
+  * Added scripts/check-source-structure.js and wired npm run lint:strict to
+    reject source files that drift from the project header and end-of-file
+    marker convention.
+
+  * Added scripts/check-android-native-metadata.js and wired npm run lint:strict
+    to reject app.json/android metadata drift for the checked-in Android
+    project. The gate now verifies package id, version, app name, orientation,
+    URL scheme, permissions, icon background, splash background, and system UI
+    style.
+
+  * Extended the Android native metadata checker to reject app-local Gradle
+    Groovy property shorthand that Gradle 10 removes. The strict lint gate now
+    protects the checked-in Android project from regressing after future Expo
+    prebuild refreshes.
+
+  * Added scripts/check-deprecated-packages.js and wired npm run lint:strict to
+    reject deprecated package metadata in both package-lock.json and installed
+    node_modules package manifests.
+
+  * Added scripts/check-diagnostics.js and wired npm run lint:strict to reject
+    direct app console calls outside utils/debugLog.ts, while still allowing
+    tests to spy on console behavior.
+
+  * Added scripts/check-test-selection.js and wired npm run lint:strict to
+    reject focused or skipped Jest tests before a release build can appear
+    green from a partial suite.
+
+  * Made the Android release build helper keep npm ci failures hard by default.
+    The npm install fallback is still available through
+    HOOT_MOBILE_NPM_FALLBACK_INSTALL=1, but the normal build path no longer
+    mutates dependency state after a reproducible install failure.
 
   * Extended the text hygiene check to reject tab characters in source,
     configuration, and documentation files, and cleaned the existing tabbed
@@ -409,10 +748,52 @@ Native Android and build outputs:
     build_scripts/debian-test-hoot-mobile-android.sh for reproducible Debian
     Android build/test validation.
 
+  * Made Debian host package installation explicit in the Android build and
+    emulator helpers. The scripts now report missing host tools by default and
+    only run apt-get when HOOT_MOBILE_INSTALL_SYSTEM_DEPS=1 or
+    HOOT_MOBILE_INSTALL_EMULATOR_DEPS=1 is set.
+
+  * Added build_scripts/android-smoke-launch.sh and npm run smoke:android for
+    repeatable attached-device or running-emulator APK validation. The smoke
+    helper installs the APK, clears logcat, launches org.brokenlamp.hoot,
+    waits for a foreground app process, and fails on fresh AndroidRuntime,
+    React Native JavaScript, or ANR crash output.
+
+  * Tightened the Android smoke launcher crash scan so AndroidRuntime logs from
+    the monkey launcher or unrelated system apps do not fail a healthy Hoot
+    launch. Native crash matching is now scoped to org.brokenlamp.hoot.
+
+  * Extended the Android smoke launcher to inspect the installed APK's
+    POST_NOTIFICATIONS permission declaration, report Android 13+ runtime
+    notification grant state, and optionally grant that permission with
+    HOOT_MOBILE_GRANT_NOTIFICATIONS=1 for emulator notification testing.
+
   * Hardened the Android emulator smoke-test helper so it resolves AVD metadata
-    from avdmanager, supports XDG_CONFIG_HOME AVD locations, and reports recent
-    emulator logs instead of waiting forever when the emulator exits before ADB
-    or boot completion.
+    from avdmanager, supports explicit XDG_CONFIG_HOME and default
+    ~/.config/.android/avd locations, and reports recent emulator logs instead
+    of waiting forever when the emulator exits before ADB or boot completion.
+
+  * Corrected the managed-emulator smoke-test completion path so kept-emulator
+    runs detach the emulator with nohup/setsid, keep stdin closed, and verify
+    that the emulator is still visible to ADB before reporting that it remains
+    available for inspection.
+
+  * Routed the Debian emulator test helper through the shared Android smoke
+    launch check so emulator validation now fails on app startup crashes instead
+    of only installing and launching the APK for visual inspection.
+
+  * Made the Debian emulator test helper pass the started emulator's adb serial
+    into the shared smoke launcher, avoiding ambiguous adb behavior when a
+    physical phone is connected at the same time.
+
+  * Made the Android build helper restore final newlines in tracked XML files
+    regenerated by Expo prebuild so a successful release build does not leave
+    the text-hygiene gate failing on generated native metadata.
+
+  * Made the Android build helper normalize Expo-generated Gradle Groovy
+    property shorthand after prebuild. The checked-in Android Gradle files now
+    use Gradle 9/10-compatible assignment syntax for app-local configuration,
+    and future release builds repeat that cleanup automatically.
 
   * Added .gitignore rules for Android native build output:
     android/.gradle, android/build, android/app/build, and android/**/.cxx.
@@ -427,6 +808,10 @@ Native Android and build outputs:
     metadata in app.json must be mirrored into the Android project when it
     changes. Disabled Expo Doctor's matching app-config sync warning so the
     intentional native-project layout does not mask real doctor failures.
+
+  * Added Android 13+ POST_NOTIFICATIONS permission to both app.json and the
+    checked-in Android manifest so Expo's notification permission prompt can
+    actually grant local alerts on modern phones and Android 34 emulators.
 
 Assets and app metadata:
 
@@ -469,31 +854,97 @@ Tests and validation:
   * Added and updated Lotide service tests for community lists, follow
     responses, community edit payloads, posts, comments, user activity,
     notifications, source feeds, private messages, user-follow endpoints,
-    instance metadata, utility request handling, pagination, and runtime
-    response normalization.
+    instance metadata, utility request handling, stalled-request timeouts,
+    pagination, and runtime response normalization.
 
   * Added component, hook, screen, and notification-poller tests covering
-    CommunityFinder, HostList, PostDisplay, RetryState, TappableList,
-    useRefreshableData, CommunityScreen, ModerationScreen, NewPostScreen,
-    NotificationScreen, ProfileActivityScreen, ProfileScreen, SearchScreen,
-    source and message notification paths, and LotideNotificationPoller.
+    AppRoot, AppErrorBoundary, CommunityFinder, HostList, HrefDisplay, Login,
+    PostDisplay, RetryState, TappableList, useComments, useHrefData,
+    useRefreshableData, CommentScreen, CommunityScreen, FeedScreen,
+    EditCommunityScreen, ForgotPasswordScreen, ModalScreen, ModerationScreen,
+    MessageListScreen, MessageThreadScreen, NewCommunity, NewPostScreen,
+    NotFoundScreen, NotificationScreen, ProfileActivityScreen, ProfileScreen,
+    SearchScreen, SourceListScreen, source and message notification paths,
+    HapticService, and LotideNotificationPoller. Added utility coverage for
+    centralized diagnostic
+    logging. Added release-engineering tests for Android native metadata
+    mirroring, deprecated package metadata rejection, centralized diagnostic
+    logging policy enforcement, focused/skipped-test rejection, and Android
+    smoke launcher notification-permission checks, and guarded external-link
+    normalization/open-failure handling.
+
+  * Added Android native metadata tests for Gradle 9/10-compatible app-local
+    assignment syntax so the checker proves both the accepted modern form and
+    the rejected deprecated shorthand.
 
   * Added ProfileScreen coverage for paginated followed-community loading so
     the profile page matches the current Lotide community list contract.
 
-  * Added regression tests for feed stale-request handling, storage corruption
-    recovery, all-page community loading, notification tap routing, notification
-    enablement rollback, API version gating, source-feed gates,
-    private-message gates, and post-create reload failures.
+  * Added regression tests for feed and comment stale-request/unmount handling,
+    storage corruption recovery, all-page community loading, notification tap
+    routing, notification enablement rollback, notification-list failed-refresh
+    preservation, notification refresh cleanup for late responses and errors,
+    API version gating, source-feed gates, source-feed list/detail/item
+    pull-to-refresh behavior, source-item comment submit/reload resilience,
+    source-item comment duplicate-submit and cleanup handling, post/comment
+    vote optimistic rollback and duplicate-submit prevention, source-item like
+    duplicate-submit prevention and cleanup after navigation, private-message
+    gates, private-message pull-to-refresh behavior, private-message inbox
+    pagination and duplicate-page suppression, private-message thread
+    pagination and overlap deduplication, private-message send/reload
+    resilience, notification poll diagnostics and manual polling, Android
+    notification permission packaging, Android native metadata mirroring,
+    Android blocked-permission recovery, Android smoke-launch notification
+    permission validation, duplicate comment-page handling, stale comment-load
+    suppression, single post/comment stale-load suppression,
+    profile-activity duplicate page-load suppression and page-overlap
+    deduplication, feed-row accessible navigation, deprecated package metadata
+    rejection, first-run host normalization and credential duplicate-submit
+    prevention, saved-profile activation duplicate-submit and stale-failure
+    cleanup, known-host domain-keyed probe updates, login cleanup after
+    navigation, login and saved-profile active-context persistence,
+    CommunityFinder loading/retry/empty-state behavior, community create/edit
+    form duplicate-submit prevention and cleanup after navigation, community
+    follow/unfollow duplicate-submit prevention and stale-failure cleanup,
+    source-feed
+    follow/unfollow duplicate-submit prevention and stale-failure cleanup,
+    regular comment submit/highlight/cleanup behavior, profile and
+    profile-activity pull-to-refresh behavior, profile follow/unfollow
+    duplicate-submit prevention and stale-failure cleanup, profile logout
+    active-context clearing, profile account-action duplicate-submit and
+    stale-failure cleanup, centralized diagnostic logging, focused/skipped test
+    rejection, root startup/session recovery, Lotide request timeout handling,
+    Lotide API URL slash normalization, refresh cleanup/stale stop handling,
+    post-create reload failures,
+    password-reset cleanup after navigation, new-post duplicate-submit and
+    cleanup handling, private-message duplicate-send prevention and send
+    cleanup after navigation, private-message dismissal duplicate-submit and
+    stale-reload suppression,
+    moderation flag dismissal duplicate-submit prevention and stale-result
+    cleanup, settings notification diagnostic cleanup after unmount, settings
+    signed-out background notification diagnostics, settings API URL
+    validation, storage API URL canonicalization, notification dedupe cache
+    trimming, notification batch summarization, and settings notification action
+    duplicate-submit prevention.
+
+  * Hardened the shared Jest VirtualizedList mock so FlatList tests can assert
+    pull-to-refresh and on-end-reached pagination props while still rendering
+    list rows synchronously.
 
   * Verified the current dependency and validation state:
-    npx expo install --check reports the Expo SDK 56 package set is current,
-    npm audit reports zero vulnerabilities, npm run lint:strict passes,
-    npx expo-doctor passes, npm test passes 25 suites and 146 tests, Expo
-    Android prebuild completes without source drift, Expo web export succeeds,
-    the Android debug build succeeds under Java 17, the Android release APK
-    build completes successfully, and the release APK installs and launches on
-    the local Android emulator.
+    npm run verify:release passes the strict release gate, including ESLint,
+    text hygiene, source header/footer structure, Android native metadata
+    mirroring, deprecated package metadata checks, centralized diagnostic
+    logging checks, focused/skipped-test checks, TypeScript no-emit, 55 Jest
+    suites and 357 tests, Expo SDK dependency validation, and npm audit with
+    zero vulnerabilities. npm run build:android completes the Android release
+    APK build under Java 17, the app-local Android Gradle files pass the
+    Gradle 10 property-shorthand checker, and the remaining Gradle deprecation
+    report entries point at current Expo/React Native dependency code rather
+    than Hoot's checked-in native project. The release APK installs and launches
+    successfully on emulator-5554 with Android notification permission granted,
+    reaches the foreground, visually renders the login host picker, and passes
+    the fresh crash-log smoke check.
 
   * Verified the npm deprecation state after the cleanup. package-lock.json no
     longer records deprecated packages, and a recursive installed-package scan

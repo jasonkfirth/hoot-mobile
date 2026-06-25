@@ -14,16 +14,17 @@
         • Fetch communities moderated by the current account
         • Fetch pending flags for the selected moderated community
         • Navigate flagged posts to their post screen
+        • Dismiss reviewed flags without duplicate submissions
         • Handle empty and failed API states without crashing
 
     This file intentionally does NOT contain:
 
-        • Flag dismissal or approval actions
+        • Flag approval actions
         • Community editing
         • Site administration workflows
 */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet } from "react-native";
 import AppButton from "../components/AppButton";
 import ActorDisplayComponent from "../components/ActorDisplay";
@@ -36,6 +37,7 @@ import * as LotideService from "../services/LotideService";
 import type { CommunityFlag } from "../services/LotideService";
 import { RootStackScreenProps } from "../types";
 import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
+import { getErrorMessage } from "../utils/error";
 
 /* ------------------------------------------------------------------------- */
 /* Moderation Screen                                                         */
@@ -56,25 +58,62 @@ export default function ModerationScreen({
   const [hasLoadedFlags, setHasLoadedFlags] = useState(false);
   const [communityReloadId, setCommunityReloadId] = useState(0);
   const [flagReloadId, setFlagReloadId] = useState(0);
+  const [dismissingFlagIds, setDismissingFlagIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const isMountedRef = useRef(true);
+  const communityRequestId = useRef(0);
+  const flagRequestId = useRef(0);
+  const dismissingFlagIdsRef = useRef(new Set<number>());
+
+  useEffect(() => {
+    const dismissingFlags = dismissingFlagIdsRef.current;
+
+    return () => {
+      isMountedRef.current = false;
+      dismissingFlags.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!ctx?.login) return;
 
+    const requestId = communityRequestId.current + 1;
+    communityRequestId.current = requestId;
+
     LotideService.getModeratedCommunities(ctx)
       .then(data => {
+        if (!isMountedRef.current || requestId !== communityRequestId.current) {
+          return;
+        }
+
         const loadedCommunities = data.items || [];
         setCommunities(loadedCommunities);
         setSelectedCommunityId(existingId =>
           existingId || loadedCommunities[0]?.id,
         );
+        if (loadedCommunities.length === 0) {
+          setFlags([]);
+          setHasLoadedFlags(false);
+        }
         setCommunityLoadError("");
       })
       .catch(() => {
+        if (!isMountedRef.current || requestId !== communityRequestId.current) {
+          return;
+        }
+
         setCommunities([]);
         setSelectedCommunityId(undefined);
+        setFlags([]);
+        setHasLoadedFlags(false);
         setCommunityLoadError("Cannot load moderated communities");
       })
-      .finally(() => setHasLoadedCommunities(true));
+      .finally(() => {
+        if (isMountedRef.current && requestId === communityRequestId.current) {
+          setHasLoadedCommunities(true);
+        }
+      });
   }, [ctx, communityReloadId]);
 
   useEffect(() => {
@@ -82,16 +121,31 @@ export default function ModerationScreen({
       return;
     }
 
+    const requestId = flagRequestId.current + 1;
+    flagRequestId.current = requestId;
+
     LotideService.getCommunityFlags(ctx, selectedCommunityId)
       .then(data => {
+        if (!isMountedRef.current || requestId !== flagRequestId.current) {
+          return;
+        }
+
         setFlags(data.items || []);
         setFlagLoadError("");
       })
       .catch(() => {
+        if (!isMountedRef.current || requestId !== flagRequestId.current) {
+          return;
+        }
+
         setFlags([]);
         setFlagLoadError("Cannot load moderation flags");
       })
-      .finally(() => setHasLoadedFlags(true));
+      .finally(() => {
+        if (isMountedRef.current && requestId === flagRequestId.current) {
+          setHasLoadedFlags(true);
+        }
+      });
   }, [ctx, selectedCommunityId, flagReloadId]);
 
   if (!ctx?.login) return <SuggestLogin />;
@@ -107,22 +161,44 @@ export default function ModerationScreen({
   };
 
   const retryFlags = () => {
+    setFlags([]);
     setHasLoadedFlags(false);
     setFlagLoadError("");
     setFlagReloadId(x => x + 1);
   };
 
+  const selectCommunity = (communityId: CommunityId) => {
+    setSelectedCommunityId(communityId);
+    setFlags([]);
+    setHasLoadedFlags(false);
+    setFlagLoadError("");
+  };
+
   const dismissFlag = (flagId: number) => {
-    if (!ctx?.login) return;
+    if (!ctx?.login || dismissingFlagIdsRef.current.has(flagId)) return;
+
+    dismissingFlagIdsRef.current.add(flagId);
+    setDismissingFlagIds(new Set(dismissingFlagIdsRef.current));
 
     LotideService.dismissCommunityFlag(ctx, flagId)
       .then(() => {
+        if (!isMountedRef.current) return;
+
         setFlags(existingFlags =>
           existingFlags.filter(flag => flag.id !== flagId),
         );
       })
-      .catch(() => {
-        Alert.alert("Failed to dismiss flag");
+      .catch(error => {
+        if (!isMountedRef.current) return;
+
+        Alert.alert("Failed to dismiss flag", getErrorMessage(error));
+      })
+      .finally(() => {
+        dismissingFlagIdsRef.current.delete(flagId);
+
+        if (isMountedRef.current) {
+          setDismissingFlagIds(new Set(dismissingFlagIdsRef.current));
+        }
       });
   };
 
@@ -152,7 +228,7 @@ export default function ModerationScreen({
               accessibilityLabel={`Select moderated community ${community.name}`}
               accessibilityRole="button"
               key={community.id}
-              onPress={() => setSelectedCommunityId(community.id)}
+              onPress={() => selectCommunity(community.id)}
               style={[
                 styles.tab,
                 {
@@ -209,6 +285,7 @@ export default function ModerationScreen({
           key={flag.id}
           flag={flag}
           navigation={navigation}
+          isDismissing={dismissingFlagIds.has(flag.id)}
           onDismiss={dismissFlag}
         />
       ))}
@@ -223,10 +300,12 @@ export default function ModerationScreen({
 function FlagItem({
   flag,
   navigation,
+  isDismissing,
   onDismiss,
 }: {
   flag: CommunityFlag;
   navigation: RootStackScreenProps<"Moderation">["navigation"];
+  isDismissing: boolean;
   onDismiss: (flagId: number) => void;
 }) {
   const theme = useTheme();
@@ -268,8 +347,9 @@ function FlagItem({
       </Pressable>
       <View style={styles.flagActions}>
         <AppButton
-          title="Dismiss"
+          title={isDismissing ? "Dismissing..." : "Dismiss"}
           color={theme.tint}
+          disabled={isDismissing}
           onPress={() => onDismiss(flag.id)}
         />
       </View>

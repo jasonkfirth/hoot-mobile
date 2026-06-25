@@ -13,6 +13,7 @@
         - Fetch feed pages for sort, community, and follow filters
         - Store returned posts
         - Expose refresh and failure state
+        - Ignore responses after replacement or unmount
 
     This file intentionally does NOT contain:
 
@@ -115,6 +116,12 @@ export default function useFeed(
         loadError: "Cannot load posts",
       }));
     });
+
+    return () => {
+      if (requestIdRef.current === requestId) {
+        requestIdRef.current = requestId + 1;
+      }
+    };
   }, [
     activeFeedState.page,
     activeFeedState.resetId,

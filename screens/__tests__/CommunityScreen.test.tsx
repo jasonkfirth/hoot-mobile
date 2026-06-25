@@ -22,7 +22,8 @@
 */
 
 import * as React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { Alert } from "react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 
 import CommunityScreen from "../CommunityScreen";
 
@@ -69,6 +70,21 @@ jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({ navigate: jest.fn() }),
 }));
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
+  };
+}
+
 describe("CommunityScreen", () => {
   const baseRoute = {
     key: "community",
@@ -99,6 +115,11 @@ describe("CommunityScreen", () => {
         user: { id: 1, username: "sj_zero", host: "lotide.fbxl.net" },
       },
     });
+    jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   test("loads and displays selected community", async () => {
@@ -254,6 +275,95 @@ describe("CommunityScreen", () => {
       );
       expect(mockGetCommunity).toHaveBeenCalledTimes(2);
     });
+  });
+
+  test("prevents duplicate unfollow requests while pending", async () => {
+    const navigation = {
+      addListener: jest.fn().mockReturnValue(() => {}),
+    } as never;
+    const pendingUnfollow = createDeferred<void>();
+    mockUnfollowCommunity.mockReturnValue(pendingUnfollow.promise);
+
+    const screen = await render(
+      <CommunityScreen
+        navigation={navigation}
+        route={baseRoute as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Unfollow")).toBeTruthy();
+    });
+
+    await fireEvent.press(
+      screen.getByRole("button", {
+        name: "Stop seeing posts from this community",
+      }),
+    );
+    await fireEvent.press(
+      screen.getByRole("button", {
+        name: "Stop seeing posts from this community",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockUnfollowCommunity).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Unfollowing...")).toBeTruthy();
+      expect(
+        screen.getByRole("button", {
+          name: "Stop seeing posts from this community",
+        }).props.accessibilityState.disabled,
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      pendingUnfollow.resolve(undefined);
+      await pendingUnfollow.promise;
+    });
+
+    await waitFor(() => {
+      expect(mockGetCommunity).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  test("ignores failed unfollow requests after leaving the screen", async () => {
+    const navigation = {
+      addListener: jest.fn().mockReturnValue(() => {}),
+    } as never;
+    const pendingUnfollow = createDeferred<void>();
+    mockUnfollowCommunity.mockReturnValue(pendingUnfollow.promise);
+
+    const screen = await render(
+      <CommunityScreen
+        navigation={navigation}
+        route={baseRoute as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Unfollow")).toBeTruthy();
+    });
+
+    await fireEvent.press(
+      screen.getByRole("button", {
+        name: "Stop seeing posts from this community",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockUnfollowCommunity).toHaveBeenCalledTimes(1);
+    });
+
+    await screen.unmount();
+
+    const drainedUnfollow = pendingUnfollow.promise.catch(() => undefined);
+    pendingUnfollow.reject(new Error("late unfollow failure"));
+
+    await drainedUnfollow;
+    await Promise.resolve();
+
+    expect(Alert.alert).not.toHaveBeenCalledWith("Failed to unfollow community");
+    expect(mockGetCommunity).toHaveBeenCalledTimes(1);
   });
 });
 

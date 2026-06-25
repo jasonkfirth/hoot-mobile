@@ -23,7 +23,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { lotideContext, lotideContextKV } from "../StorageService";
+import { appSettings, lotideContext, lotideContextKV } from "../StorageService";
 
 describe("StorageService", () => {
   beforeEach(async () => {
@@ -35,6 +35,21 @@ describe("StorageService", () => {
 
     await expect(lotideContext.query()).resolves.toBeUndefined();
     await expect(AsyncStorage.getItem("@lotide_ctx")).resolves.toBeNull();
+  });
+
+  test("canonicalizes active context API URLs", async () => {
+    await lotideContext.store({
+      apiUrl: " https://lotide.fbxl.net/api/unstable/// ",
+    });
+
+    await expect(lotideContext.query()).resolves.toEqual({
+      apiUrl: "https://lotide.fbxl.net/api/unstable",
+    });
+    await expect(AsyncStorage.getItem("@lotide_ctx")).resolves.toBe(
+      JSON.stringify({
+        apiUrl: "https://lotide.fbxl.net/api/unstable",
+      }),
+    );
   });
 
   test("filters malformed saved account entries", async () => {
@@ -55,6 +70,120 @@ describe("StorageService", () => {
     });
   });
 
+  test("canonicalizes saved account keys and contexts", async () => {
+    await lotideContextKV.store({
+      apiUrl: " https://lotide.fbxl.net/api/unstable/// ",
+      login: {
+        token: "token-1",
+        user: {
+          id: 1,
+          username: "alice",
+          host: "lotide.fbxl.net",
+        },
+      },
+    });
+
+    await expect(lotideContextKV.listKeys()).resolves.toEqual([
+      "alice@https://lotide.fbxl.net/api/unstable",
+    ]);
+    await expect(lotideContextKV.getStore()).resolves.toEqual({
+      "alice@https://lotide.fbxl.net/api/unstable": {
+        apiUrl: "https://lotide.fbxl.net/api/unstable",
+        login: {
+          token: "token-1",
+          user: {
+            id: 1,
+            username: "alice",
+            host: "lotide.fbxl.net",
+          },
+        },
+      },
+    });
+  });
+
+  test("canonicalizes legacy saved account entries while reading them", async () => {
+    await AsyncStorage.setItem(
+      "@lotide_ctx_arr",
+      JSON.stringify({
+        "alice@https://lotide.fbxl.net/api/unstable///": {
+          apiUrl: "https://lotide.fbxl.net/api/unstable///",
+          login: {
+            token: "token-1",
+            user: {
+              id: 1,
+              username: "alice",
+              host: "lotide.fbxl.net",
+            },
+          },
+        },
+      }),
+    );
+
+    await expect(lotideContextKV.getStore()).resolves.toEqual({
+      "alice@https://lotide.fbxl.net/api/unstable": {
+        apiUrl: "https://lotide.fbxl.net/api/unstable",
+        login: {
+          token: "token-1",
+          user: {
+            id: 1,
+            username: "alice",
+            host: "lotide.fbxl.net",
+          },
+        },
+      },
+    });
+    await expect(
+      lotideContextKV.query("alice@https://lotide.fbxl.net/api/unstable///"),
+    ).resolves.toEqual({
+      apiUrl: "https://lotide.fbxl.net/api/unstable",
+      login: {
+        token: "token-1",
+        user: {
+          id: 1,
+          username: "alice",
+          host: "lotide.fbxl.net",
+        },
+      },
+    });
+  });
+
+  test("removes legacy saved account aliases", async () => {
+    await AsyncStorage.setItem(
+      "@lotide_ctx_arr",
+      JSON.stringify({
+        "alice@https://lotide.fbxl.net/api/unstable///": {
+          apiUrl: "https://lotide.fbxl.net/api/unstable///",
+          login: {
+            token: "token-1",
+            user: {
+              id: 1,
+              username: "alice",
+              host: "lotide.fbxl.net",
+            },
+          },
+        },
+      }),
+    );
+
+    await expect(
+      lotideContextKV.remove("alice@https://lotide.fbxl.net/api/unstable"),
+    ).resolves.toEqual({
+      apiUrl: "https://lotide.fbxl.net/api/unstable",
+      login: {
+        token: "token-1",
+        user: {
+          id: 1,
+          username: "alice",
+          host: "lotide.fbxl.net",
+        },
+      },
+    });
+    await expect(lotideContextKV.getStore()).resolves.toEqual({});
+    await expect(AsyncStorage.getItem("@lotide_ctx_arr")).resolves.toBe(
+      JSON.stringify({}),
+    );
+  });
+
   test("continues to store accounts after a corrupt store is cleared", async () => {
     await AsyncStorage.setItem("@lotide_ctx_arr", "{not json");
 
@@ -73,6 +202,35 @@ describe("StorageService", () => {
     await expect(lotideContextKV.listKeys()).resolves.toEqual([
       "alice@https://lotide.fbxl.net/api/unstable",
     ]);
+  });
+
+  test("loads default app settings when storage is empty", async () => {
+    await expect(appSettings.query()).resolves.toEqual({
+      defaultFeedSort: "hot",
+    });
+  });
+
+  test("persists app settings", async () => {
+    await appSettings.update({
+      defaultFeedSort: "new",
+    });
+
+    await expect(appSettings.query()).resolves.toEqual({
+      defaultFeedSort: "new",
+    });
+  });
+
+  test("repairs malformed app settings", async () => {
+    await AsyncStorage.setItem(
+      "@hoot_app_settings",
+      JSON.stringify({
+        defaultFeedSort: "sideways",
+      }),
+    );
+
+    await expect(appSettings.query()).resolves.toEqual({
+      defaultFeedSort: "hot",
+    });
   });
 });
 

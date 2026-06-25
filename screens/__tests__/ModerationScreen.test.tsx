@@ -14,16 +14,18 @@
         • Verify moderated communities are loaded
         • Verify flags are loaded for the selected community
         • Verify flagged posts navigate to their post screen
+        • Verify flag dismissal behavior is request-safe
 
     This file intentionally does NOT contain:
 
-        • Flag dismissal behavior
+        • Flag approval behavior
         • Site administration behavior
         • API transport tests
 */
 
 import * as React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { Alert } from "react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider } from "react-redux";
 import configureStoreMock from "redux-mock-store";
 
@@ -78,9 +80,26 @@ function renderWithStore(ui: React.ReactElement) {
   );
 }
 
+function deferred<T>() {
+  let resolveValue: (value: T | PromiseLike<T>) => void = () => undefined;
+  let rejectValue: (reason?: unknown) => void = () => undefined;
+
+  const promise = new Promise<T>((resolve, reject) => {
+    resolveValue = resolve;
+    rejectValue = reject;
+  });
+
+  return {
+    promise,
+    resolve: resolveValue,
+    reject: rejectValue,
+  };
+}
+
 describe("ModerationScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
     mockGetModeratedCommunities.mockResolvedValue({
       items: [
         {
@@ -114,6 +133,10 @@ describe("ModerationScreen", () => {
       next_page: null,
     });
     mockDismissCommunityFlag.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   test("loads moderated communities, opens flagged posts, and dismisses flags", async () => {
@@ -207,6 +230,128 @@ describe("ModerationScreen", () => {
       expect(screen.getByText("Cannot load moderated communities")).toBeTruthy();
     });
     expect(mockGetCommunityFlags).not.toHaveBeenCalled();
+  });
+
+  test("blocks duplicate flag dismissals while one is pending", async () => {
+    const pendingDismiss = deferred<void>();
+    const navigation = { navigate: jest.fn() };
+    const route = {
+      key: "moderation",
+      name: "Moderation",
+      params: undefined,
+    };
+
+    mockDismissCommunityFlag.mockReturnValue(pendingDismiss.promise);
+
+    const screen = await renderWithStore(
+      <ModerationScreen
+        navigation={navigation as never}
+        route={route as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Reported post")).toBeTruthy();
+    });
+
+    await fireEvent.press(screen.getByRole("button", { name: "Dismiss" }));
+    await fireEvent.press(
+      screen.getByRole("button", { name: "Dismissing..." }),
+    );
+
+    await waitFor(() => {
+      expect(mockDismissCommunityFlag).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Dismissing...")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Dismissing..." }).props
+        .accessibilityState.disabled).toBe(true);
+    });
+
+    await act(async () => {
+      pendingDismiss.resolve(undefined);
+      await pendingDismiss.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Reported post")).toBeNull();
+    });
+  });
+
+  test("reports flag dismissal failures and reenables the action", async () => {
+    const navigation = { navigate: jest.fn() };
+    const route = {
+      key: "moderation",
+      name: "Moderation",
+      params: undefined,
+    };
+
+    mockDismissCommunityFlag.mockRejectedValue(new Error("still under review"));
+
+    const screen = await renderWithStore(
+      <ModerationScreen
+        navigation={navigation as never}
+        route={route as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Reported post")).toBeTruthy();
+    });
+
+    await fireEvent.press(screen.getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => {
+      expect(Alert.alert).toHaveBeenCalledWith(
+        "Failed to dismiss flag",
+        "still under review",
+      );
+      expect(screen.getByText("Reported post")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Dismiss" }).props
+        .accessibilityState.disabled).toBe(false);
+    });
+  });
+
+  test("ignores flag dismissal failures after leaving the moderation screen", async () => {
+    const pendingDismiss = deferred<void>();
+    const navigation = { navigate: jest.fn() };
+    const route = {
+      key: "moderation",
+      name: "Moderation",
+      params: undefined,
+    };
+
+    mockDismissCommunityFlag.mockReturnValue(pendingDismiss.promise);
+
+    const screen = await renderWithStore(
+      <ModerationScreen
+        navigation={navigation as never}
+        route={route as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Reported post")).toBeTruthy();
+    });
+
+    await fireEvent.press(screen.getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => {
+      expect(mockDismissCommunityFlag).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      screen.unmount();
+    });
+
+    const drainedDismiss = pendingDismiss.promise.catch(() => undefined);
+    pendingDismiss.reject(new Error("late moderation failure"));
+
+    await drainedDismiss;
+    await Promise.resolve();
+
+    expect(Alert.alert).not.toHaveBeenCalledWith(
+      "Failed to dismiss flag",
+      "late moderation failure",
+    );
   });
 });
 

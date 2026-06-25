@@ -39,6 +39,58 @@ import * as LotideService from "../services/LotideService";
 import { RootStackScreenProps, RootTabScreenProps } from "../types";
 
 /* ------------------------------------------------------------------------- */
+/* Notification Loading                                                      */
+/* ------------------------------------------------------------------------- */
+
+type NotificationRefreshHandlers = {
+  setNotifications: React.Dispatch<React.SetStateAction<FullNotification[]>>;
+  setLoadError: React.Dispatch<React.SetStateAction<string>>;
+  stopLoading: () => void;
+};
+
+export function refreshNotificationsForScreen(
+  ctx: LotideContext | null | undefined,
+  {
+    setNotifications,
+    setLoadError,
+    stopLoading,
+  }: NotificationRefreshHandlers,
+) {
+  let isActive = true;
+
+  if (!ctx?.login) {
+    setNotifications([]);
+    setLoadError("");
+    stopLoading();
+
+    return () => {
+      isActive = false;
+    };
+  }
+
+  setLoadError("");
+  LotideService.getNotifications(ctx)
+    .then(data => {
+      if (!isActive) return;
+
+      setNotifications(data);
+      setLoadError("");
+    })
+    .catch(() => {
+      if (!isActive) return;
+
+      setLoadError("Cannot load notifications");
+    })
+    .finally(() => {
+      if (isActive) stopLoading();
+    });
+
+  return () => {
+    isActive = false;
+  };
+}
+
+/* ------------------------------------------------------------------------- */
 /* Notification Screen Component                                             */
 /* ------------------------------------------------------------------------- */
 
@@ -50,26 +102,12 @@ export default function NotificationScreen({
   const theme = useTheme();
   const ctx = useLotideCtx();
   const [isRefreshing, refresh] = useRefreshableData(
-    stopLoading => {
-      if (!ctx?.login) {
-        setNotifications([]);
-        setLoadError("");
-        stopLoading();
-        return;
-      }
-
-      setLoadError("");
-      LotideService.getNotifications(ctx)
-        .then(data => {
-          setNotifications(data);
-          setLoadError("");
-        })
-        .catch(() => {
-          setNotifications([]);
-          setLoadError("Cannot load notifications");
-        })
-        .finally(stopLoading);
-    },
+    stopLoading =>
+      refreshNotificationsForScreen(ctx, {
+        setNotifications,
+        setLoadError,
+        stopLoading,
+      }),
     [ctx?.login?.token],
   );
   useEffect(
@@ -93,6 +131,7 @@ export default function NotificationScreen({
   return (
     <FlatList
       style={[styles.container, { backgroundColor: theme.background }]}
+      testID="notification-list"
       data={notifications}
       renderItem={renderItem}
       keyExtractor={(item, index) =>
@@ -106,6 +145,16 @@ export default function NotificationScreen({
       onRefresh={() => {
         refresh();
       }}
+      ListHeaderComponent={
+        notifications.length > 0 && loadError ? (
+          <RetryState
+            compact
+            message={loadError}
+            onRetry={refresh}
+            style={styles.inlineError}
+          />
+        ) : null
+      }
       ListEmptyComponent={
         !isRefreshing ? (
           <View style={styles.empty}>
@@ -407,12 +456,12 @@ const ReplyItem = ({ item }: { item: ReplyNotification }) => {
       <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
       {author ? (
         <ActorDisplayComponent
-              name={author.username}
-              host={author.host}
-              local={author.local ?? false}
-              showHost="only_foreign"
-              colorize="never"
-              userId={author.id}
+          name={author.username}
+          host={author.host}
+          local={author.local ?? false}
+          showHost="only_foreign"
+          colorize="never"
+          userId={author.id}
         />
       ) : (
         <Text>Unknown author</Text>
@@ -535,6 +584,10 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: "center",
     justifyContent: "center",
+  },
+  inlineError: {
+    paddingHorizontal: 15,
+    paddingVertical: 14,
   },
 });
 

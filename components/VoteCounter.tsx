@@ -51,9 +51,14 @@ export interface VoteCounterProps {
 export default function VoteCounter(props: VoteCounterProps) {
   const theme = useTheme();
   const ctx = useLotideCtx();
-  const { isUpvoted, addVote, removeVote } = useVote(props.type, props.content);
+  const { isUpvoted, isVoting, addVote, removeVote } = useVote(
+    props.type,
+    props.content,
+  );
 
   function toggleVote() {
+    if (isVoting) return;
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     if (!ctx?.login) {
@@ -77,9 +82,11 @@ export default function VoteCounter(props: VoteCounterProps) {
     <Pressable
       accessibilityLabel={isUpvoted ? "Remove like" : "Like"}
       accessibilityRole="button"
+      accessibilityState={{ disabled: isVoting }}
+      disabled={isVoting}
       onPress={() => toggleVote()}
       hitSlop={TOUCH_TARGET_HIT_SLOP}
-      style={[styles.touchTarget, props.style]}
+      style={[styles.touchTarget, isVoting && styles.disabled, props.style]}
     >
       <View style={styles.content}>
         <Icon
@@ -115,6 +122,9 @@ const styles = StyleSheet.create({
   score: {
     fontSize: 18,
     minWidth: 28,
+  },
+  disabled: {
+    opacity: 0.6,
   },
 });
 

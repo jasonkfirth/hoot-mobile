@@ -10,7 +10,8 @@
 
     Responsibilities:
 
-        - Submit the community name
+        - Submit a trimmed community name
+        - Optionally save an initial description
         - Load the created community
         - Navigate to the new community screen
 
@@ -20,10 +21,11 @@
         - moderation
 */
 
-import React, { useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import { Alert, StyleSheet, TextInput } from "react-native";
 import AppButton from "../components/AppButton";
 import { Text, View } from "../components/Themed";
+import SuggestLogin from "../components/SuggestLogin";
 import useTheme from "../hooks/useTheme";
 import { RootStackScreenProps } from "../types";
 import * as LotideService from "../services/LotideService";
@@ -31,59 +33,156 @@ import { useLotideCtx } from "../hooks/useLotideCtx";
 import { getErrorMessage } from "../utils/error";
 import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 
+const MIN_COMMUNITY_NAME_LENGTH = 4;
+
 export default function NewCommunityScreen({
   navigation,
 }: RootStackScreenProps<"NewCommunity">) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isMountedRef = useRef(true);
+  const isSubmittingRef = useRef(false);
   const theme = useTheme();
   const ctx = useLotideCtx();
+  const trimmedName = name.trim();
+  const trimmedDescription = description.trim();
+  const remainingNameCharacters =
+    trimmedName.length > 0
+      ? Math.max(MIN_COMMUNITY_NAME_LENGTH - trimmedName.length, 0)
+      : MIN_COMMUNITY_NAME_LENGTH;
+  const canSubmit =
+    !!ctx?.login &&
+    trimmedName.length >= MIN_COMMUNITY_NAME_LENGTH &&
+    !isSubmitting;
 
-  if (!ctx) return null;
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      isSubmittingRef.current = false;
+    };
+  }, []);
 
-  function submit() {
-    if (!ctx?.login) return;
-    LotideService.newCommunity(ctx, name)
-      .then(async data => {
-        const id = data.community.id;
-        if (description) {
-          await LotideService.editCommunity(ctx, id, description);
-        }
-        await LotideService.followCommunity(ctx, id);
-        const community = await LotideService.getCommunity(ctx, id);
+  if (!ctx?.login) {
+    return <SuggestLogin />;
+  }
+
+  const activeCtx = ctx;
+
+  function alertIfMounted(title: string, message: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
+  }
+
+  async function runOptionalCommunitySetup(id: CommunityId): Promise<string[]> {
+    const warnings: string[] = [];
+
+    if (trimmedDescription) {
+      try {
+        await LotideService.editCommunity(activeCtx, id, trimmedDescription);
+      } catch (error) {
+        warnings.push(`Description was not saved: ${getErrorMessage(error)}`);
+      }
+    }
+
+    try {
+      await LotideService.followCommunity(activeCtx, id);
+    } catch (error) {
+      warnings.push(`Follow did not complete: ${getErrorMessage(error)}`);
+    }
+
+    return warnings;
+  }
+
+  async function submit() {
+    if (isSubmittingRef.current) return;
+    if (!canSubmit) return;
+
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+
+    try {
+      const data = await LotideService.newCommunity(activeCtx, trimmedName);
+      const id = data.community.id;
+
+      if (!isMountedRef.current) return;
+
+      const warnings = await runOptionalCommunitySetup(id);
+
+      if (!isMountedRef.current) return;
+
+      try {
+        const community = await LotideService.getCommunity(activeCtx, id);
+
+        if (!isMountedRef.current) return;
+
         navigation.replace("Community", { community });
-      })
-      .catch(e => Alert.alert("Failed to create community", getErrorMessage(e)));
+      } catch (error) {
+        if (!isMountedRef.current) return;
+
+        navigation.replace("Community", { id });
+        warnings.push(
+          `Community was created, but could not be reloaded: ${getErrorMessage(error)}`,
+        );
+      }
+
+      if (warnings.length > 0) {
+        alertIfMounted("Community created", warnings.join("\n"));
+      }
+    } catch (e) {
+      alertIfMounted("Failed to create community", getErrorMessage(e));
+    } finally {
+      isSubmittingRef.current = false;
+
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
   }
 
   return (
     <View style={styles.root}>
       <TextInput
+        accessibilityLabel="Community name"
         style={[styles.input, { fontSize: 20, color: theme.text }]}
         placeholder="Community Name"
         placeholderTextColor={theme.placeholderText}
         value={name}
         onChangeText={setName}
+        autoCapitalize="none"
+        autoCorrect={false}
       />
-      {name.length >= 4 ? (
+      {trimmedName.length >= MIN_COMMUNITY_NAME_LENGTH ? (
         <>
           <TextInput
+            accessibilityLabel="Community description"
             style={[styles.input, { color: theme.text }]}
             placeholder="Description (Optional)"
             placeholderTextColor={theme.placeholderText}
             value={description}
             onChangeText={setDescription}
+            multiline
           />
           <AppButton
-            title="Submit"
+            title={isSubmitting ? "Creating..." : "Create Community"}
             color={theme.tint}
-            onPress={submit}
+            onPress={() => {
+              void submit();
+            }}
             accessibilityLabel="Create new community"
+            disabled={!canSubmit}
             fullWidth
           />
         </>
       ) : (
-        <Text>{name.length > 0 && 4 - name.length}</Text>
+        <Text secondary>
+          {trimmedName.length > 0
+            ? `${remainingNameCharacters} more character${
+                remainingNameCharacters === 1 ? "" : "s"
+              }`
+            : "Community names need at least 4 characters."}
+        </Text>
       )}
     </View>
   );

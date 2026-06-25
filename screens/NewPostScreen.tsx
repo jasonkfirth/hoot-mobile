@@ -20,7 +20,7 @@
         - comment composition
 */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
   Keyboard,
@@ -56,8 +56,12 @@ export default function NewPostScreen({
   const [title, setTitle] = useState("");
   const [link, setLink] = useState("");
   const [content, setContent] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isMountedRef = useRef(true);
+  const isSubmittingRef = useRef(false);
   const theme = useTheme();
   const ctx = useLotideCtx();
+  const titleLength = title.trim().length;
 
   useEffect(() => {
     return navigation.addListener("focus", () => {
@@ -70,6 +74,13 @@ export default function NewPostScreen({
     });
   }, [navigation, route.params.community, route.params.community?.id]);
 
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      isSubmittingRef.current = false;
+    };
+  }, []);
+
   if (!ctx?.login) {
     return <SuggestLogin />;
   }
@@ -77,21 +88,47 @@ export default function NewPostScreen({
   if (community === null)
     return <CommunityFinder onSelect={setCommunity} />;
 
-  function submit() {
+  function alertIfMounted(title: string, message: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
+  }
+
+  async function submit() {
+    if (isSubmittingRef.current) return;
     if (!ctx || !community) return;
-    LotideService.submitPost(ctx, {
-      community: community.id,
-      title: title,
-      href: link || undefined,
-      content_markdown: content || " ",
-    })
-      .then(data => LotideService.getPost(ctx, data.id))
-      .then(post => {
-        reset();
-        dispatch(setPost({ post }));
-        navigation.navigate("Post", { postId: post.id });
-      })
-      .catch(e => Alert.alert("Could not submit post", getErrorMessage(e)));
+
+    const trimmedTitle = title.trim();
+    const trimmedLink = link.trim();
+
+    if (trimmedTitle.length < 4) return;
+
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+
+    try {
+      const data = await LotideService.submitPost(ctx, {
+        community: community.id,
+        title: trimmedTitle,
+        href: trimmedLink || undefined,
+        content_markdown: content.trim() || " ",
+      });
+      const post = await LotideService.getPost(ctx, data.id);
+
+      if (!isMountedRef.current) return;
+
+      reset();
+      dispatch(setPost({ post }));
+      navigation.navigate("Post", { postId: post.id });
+    } catch (e) {
+      alertIfMounted("Could not submit post", getErrorMessage(e));
+    } finally {
+      isSubmittingRef.current = false;
+
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
   }
 
   function reset() {
@@ -136,7 +173,7 @@ export default function NewPostScreen({
             value={title}
             onChangeText={setTitle}
           />
-          {title.length >= 4 ? (
+          {titleLength >= 4 ? (
             <>
               <TextInput
                 style={[styles.input, { color: theme.text }]}
@@ -157,15 +194,18 @@ export default function NewPostScreen({
             </>
           ) : (
             <Text style={{ color: theme.secondaryText }}>
-              {title.length > 0 && 4 - title.length}
+              {titleLength > 0 && 4 - titleLength}
             </Text>
           )}
-          {!!community && title.length >= 4 && (
+          {!!community && titleLength >= 4 && (
             <AppButton
-              onPress={submit}
-              title="Submit"
+              onPress={() => {
+                void submit();
+              }}
+              title={isSubmitting ? "Submitting..." : "Submit"}
               color={theme.tint}
               accessibilityLabel="Submit new post"
+              disabled={isSubmitting}
               fullWidth
             />
           )}

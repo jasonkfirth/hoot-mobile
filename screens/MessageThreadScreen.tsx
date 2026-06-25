@@ -12,6 +12,7 @@
 
         - Gate conversation threads behind the Lotide 0.18 message capability
         - Load messages with a single other user
+        - Page through longer conversations without duplicate messages
         - Render messages in chronological order
         - Send replies to the current conversation
 
@@ -22,14 +23,15 @@
         - Rich text editing
 */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TextInput,
 } from "react-native";
+import AppButton from "../components/AppButton";
 import { ActorDisplay } from "../components/ActorDisplay";
 import ContentDisplay from "../components/ContentDisplay";
 import ElapsedTime from "../components/ElapsedTime";
@@ -37,11 +39,11 @@ import RetryState from "../components/RetryState";
 import SuggestLogin from "../components/SuggestLogin";
 import { Text, View } from "../components/Themed";
 import { supportsPrivateMessages } from "../constants/LotideApi";
-import { MINIMUM_TOUCH_TARGET_SIZE } from "../constants/TouchTargets";
 import { useLotideCtx } from "../hooks/useLotideCtx";
 import useTheme from "../hooks/useTheme";
 import * as LotideService from "../services/LotideService";
 import { RootStackScreenProps } from "../types";
+import { getErrorMessage } from "../utils/error";
 
 export default function MessageThreadScreen({
   route,
@@ -52,10 +54,26 @@ export default function MessageThreadScreen({
   const [messages, setMessages] = useState<PrivateMessage[]>([]);
   const [loadError, setLoadError] = useState("");
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [reloadId, setReloadId] = useState(0);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [nextPageState, setNextPageState] = useState({
+    threadScopeKey: "",
+    nextPage: null as string | null,
+  });
+  const [loadingPageKey, setLoadingPageKey] = useState<string | null>(null);
+  const threadRequestId = useRef(0);
+  const nextPageRequestKey = useRef<string | null>(null);
+  const isMountedRef = useRef(true);
+  const isSendingRef = useRef(false);
   const canUseMessages = supportsPrivateMessages(ctx?.apiVersion);
+  const threadScopeKey = `${ctx?.apiUrl ?? ""}::${ctx?.login?.token ?? ""}::${userId ?? ""}`;
+  const nextPage = nextPageState.threadScopeKey === threadScopeKey
+    ? nextPageState.nextPage
+    : null;
+  const activePageKey = nextPage ? `${threadScopeKey}::${nextPage}` : null;
+  const isLoadingNextPage = !!activePageKey && loadingPageKey === activePageKey;
   const displayMessages = useMemo(
     () => [...messages].sort(compareMessagesChronologically),
     [messages],
@@ -63,27 +81,47 @@ export default function MessageThreadScreen({
   const latestMessageId = displayMessages[displayMessages.length - 1]?.id;
 
   useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      isSendingRef.current = false;
+      nextPageRequestKey.current = null;
+      threadRequestId.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ctx?.login || !canUseMessages || !userId) return;
 
     let isActive = true;
+    const requestId = threadRequestId.current + 1;
+
+    threadRequestId.current = requestId;
+    nextPageRequestKey.current = null;
 
     LotideService.getPrivateMessageThread(ctx, userId)
       .then(data => {
-        if (!isActive) return;
+        if (!isActive || requestId !== threadRequestId.current) return;
         setMessages(data.items);
+        setNextPageState({ threadScopeKey, nextPage: data.next_page });
         setLoadError("");
         setHasLoaded(true);
       })
       .catch(() => {
-        if (!isActive) return;
+        if (!isActive || requestId !== threadRequestId.current) return;
         setLoadError("Cannot load conversation");
+        setNextPageState({ threadScopeKey, nextPage: null });
         setHasLoaded(true);
+      })
+      .finally(() => {
+        if (isActive && requestId === threadRequestId.current) {
+          setIsRefreshing(false);
+        }
       });
 
     return () => {
       isActive = false;
     };
-  }, [canUseMessages, ctx, reloadId, userId]);
+  }, [canUseMessages, ctx, reloadId, threadScopeKey, userId]);
 
   if (!ctx?.login) {
     return <SuggestLogin />;
@@ -108,14 +146,59 @@ export default function MessageThreadScreen({
   }
 
   function refresh() {
+    threadRequestId.current += 1;
+    nextPageRequestKey.current = null;
     setLoadError("");
     setHasLoaded(false);
+    setIsRefreshing(true);
+    setLoadingPageKey(null);
+    setNextPageState({ threadScopeKey, nextPage: null });
     setReloadId(x => x + 1);
   }
 
-  function send() {
-    if (!ctx?.login || !draft.trim() || !userId) return;
+  function loadNextPage() {
+    if (!ctx?.login || !userId || !nextPage) return;
 
+    const requestPageKey = `${threadScopeKey}::${nextPage}`;
+
+    if (nextPageRequestKey.current === requestPageKey) return;
+
+    const requestId = threadRequestId.current;
+
+    nextPageRequestKey.current = requestPageKey;
+    setLoadingPageKey(requestPageKey);
+
+    LotideService.getPrivateMessageThread(ctx, userId, nextPage)
+      .then(data => {
+        if (!isMountedRef.current || requestId !== threadRequestId.current) {
+          return;
+        }
+
+        setMessages(existing => mergePrivateMessages(existing, data.items));
+        setNextPageState({ threadScopeKey, nextPage: data.next_page });
+        setLoadError("");
+      })
+      .catch(() => {
+        if (!isMountedRef.current || requestId !== threadRequestId.current) {
+          return;
+        }
+
+        setLoadError("Cannot load conversation");
+      })
+      .finally(() => {
+        if (isMountedRef.current && nextPageRequestKey.current === requestPageKey) {
+          nextPageRequestKey.current = null;
+          setLoadingPageKey(existing =>
+            existing === requestPageKey ? null : existing,
+          );
+        }
+      });
+  }
+
+  function send() {
+    if (!ctx?.login || !draft.trim() || !userId || isSendingRef.current) return;
+
+    isSendingRef.current = true;
     setIsSending(true);
     LotideService.sendPrivateMessage(
       ctx,
@@ -123,21 +206,41 @@ export default function MessageThreadScreen({
       draft.trim(),
       latestMessageId,
     )
-      .then(() => {
+      .then(message => {
+        if (!isMountedRef.current) return;
+
+        setMessages(existing => upsertPrivateMessage(existing, message));
         setDraft("");
         refresh();
       })
-      .catch(() => {
-        Alert.alert("Could not send message");
+      .catch(error => {
+        if (!isMountedRef.current) return;
+
+        Alert.alert("Could not send message", getErrorMessage(error));
       })
-      .finally(() => setIsSending(false));
+      .finally(() => {
+        isSendingRef.current = false;
+
+        if (isMountedRef.current) {
+          setIsSending(false);
+        }
+      });
   }
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <ScrollView
+        testID="message-thread-scroll"
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={refresh}
+            tintColor={theme.tint}
+            colors={[theme.tint]}
+          />
+        }
       >
         {loadError ? (
           <RetryState compact message={loadError} onRetry={refresh} />
@@ -149,6 +252,18 @@ export default function MessageThreadScreen({
           <Text style={{ color: theme.secondaryText }}>
             No messages in this conversation yet.
           </Text>
+        ) : null}
+        {nextPage ? (
+          <AppButton
+            title={isLoadingNextPage ? "Loading earlier..." : "Load earlier messages"}
+            accessibilityLabel="Load earlier messages"
+            color={theme.secondaryBackground}
+            disabled={isLoadingNextPage}
+            fullWidth
+            onPress={loadNextPage}
+            style={styles.loadEarlierButton}
+            textColor={theme.text}
+          />
         ) : null}
         {displayMessages.map(message => (
           <MessageBubble
@@ -182,23 +297,14 @@ export default function MessageThreadScreen({
             },
           ]}
         />
-        <Pressable
+        <AppButton
+          title="Send"
           accessibilityLabel="Send message"
-          accessibilityRole="button"
           disabled={isSending || !draft.trim()}
           onPress={send}
-          style={[
-            styles.sendButton,
-            {
-              backgroundColor:
-                isSending || !draft.trim()
-                  ? theme.tertiaryBackground
-                  : theme.tint,
-            },
-          ]}
-        >
-          <Text style={{ color: "#111827", fontWeight: "600" }}>Send</Text>
-        </Pressable>
+          fullWidth
+          style={styles.sendButton}
+        />
       </View>
     </View>
   );
@@ -265,6 +371,40 @@ function compareMessagesChronologically(
   return left.id - right.id;
 }
 
+function upsertPrivateMessage(
+  existing: PrivateMessage[],
+  message: PrivateMessage,
+) {
+  const index = existing.findIndex(item => item.id === message.id);
+
+  if (index < 0) {
+    return [...existing, message];
+  }
+
+  return [
+    ...existing.slice(0, index),
+    message,
+    ...existing.slice(index + 1),
+  ];
+}
+
+function mergePrivateMessages(
+  existing: PrivateMessage[],
+  incoming: PrivateMessage[],
+) {
+  const seenIds = new Set(existing.map(message => message.id));
+  const merged = [...existing];
+
+  incoming.forEach(message => {
+    if (seenIds.has(message.id)) return;
+
+    seenIds.add(message.id);
+    merged.push(message);
+  });
+
+  return merged;
+}
+
 function parseFiniteNumber(value: string | number | undefined) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return undefined;
@@ -286,6 +426,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 24,
+  },
+  loadEarlierButton: {
+    marginBottom: 12,
   },
   message: {
     borderRadius: 8,
@@ -319,11 +462,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   sendButton: {
-    alignItems: "center",
-    borderRadius: 8,
-    justifyContent: "center",
     marginTop: 10,
-    minHeight: MINIMUM_TOUCH_TARGET_SIZE,
   },
 });
 

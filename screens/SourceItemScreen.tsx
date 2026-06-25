@@ -24,12 +24,12 @@
 
 import Icon from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
   Image,
-  Linking,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -50,6 +50,8 @@ import useTheme from "../hooks/useTheme";
 import * as Haptics from "../services/HapticService";
 import * as LotideService from "../services/LotideService";
 import { RootStackScreenProps } from "../types";
+import { getErrorMessage } from "../utils/error";
+import { openExternalLink } from "../utils/externalLink";
 
 export default function SourceItemScreen({
   route,
@@ -61,6 +63,7 @@ export default function SourceItemScreen({
   const [sourceItem, setSourceItem] = useState<CollectionTargetItem>();
   const [loadError, setLoadError] = useState("");
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [reloadId, setReloadId] = useState(0);
   const canUseSources = supportsCollectionTargets(ctx?.apiVersion);
 
@@ -82,6 +85,10 @@ export default function SourceItemScreen({
         if (!isActive) return;
         setLoadError("Cannot load source item");
         setHasLoaded(true);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setIsRefreshing(false);
       });
 
     return () => {
@@ -117,6 +124,12 @@ export default function SourceItemScreen({
     setReloadId(x => x + 1);
   }
 
+  function refreshFromGesture() {
+    setLoadError("");
+    setIsRefreshing(true);
+    setReloadId(x => x + 1);
+  }
+
   if (!sourceItem && loadError) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
@@ -137,13 +150,30 @@ export default function SourceItemScreen({
 
   return (
     <ScrollView
+      testID="source-item-scroll"
       style={[styles.root, { backgroundColor: theme.background }]}
       contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl refreshing={isRefreshing} onRefresh={refreshFromGesture} />
+      }
     >
+      {loadError ? (
+        <RetryState
+          compact
+          message={loadError}
+          onRetry={refresh}
+          style={styles.inlineRetry}
+        />
+      ) : null}
       <SourceItemBody
         sourceItem={sourceItem}
         collectionTargetId={collectionTargetId}
         itemId={itemId}
+        onCommentAccepted={comment =>
+          setSourceItem(item =>
+            item ? upsertSourceItemComment(item, comment) : item,
+          )
+        }
         onChanged={refresh}
       />
     </ScrollView>
@@ -154,11 +184,13 @@ function SourceItemBody({
   sourceItem,
   collectionTargetId,
   itemId,
+  onCommentAccepted,
   onChanged,
 }: {
   sourceItem: CollectionTargetItem;
   collectionTargetId: CollectionTargetId;
   itemId: CollectionTargetItemId;
+  onCommentAccepted: (comment: CollectionTargetItemComment) => void;
   onChanged: () => void;
 }) {
   const ctx = useLotideCtx();
@@ -167,16 +199,49 @@ function SourceItemBody({
     useNavigation<RootStackScreenProps<"CollectionTargetItem">["navigation"]>();
   const [commentText, setCommentText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isVoting, setIsVoting] = useState(false);
+  const isMountedRef = useRef(true);
+  const isSubmittingRef = useRef(false);
+  const isVotingRef = useRef(false);
   const { collection, item, comments } = sourceItem;
   const sourceHref = item.url || item.ap_id;
   const hasCachedBody = !!item.content_html || !!item.summary_html;
-  const canVote = !!ctx?.login && collection.preview_item_likes_supported;
+  const canVote =
+    !!ctx?.login && collection.preview_item_likes_supported && !isVoting;
   const canReply = !!ctx?.login && collection.can_reply;
+  const voteColor = item.your_vote ? theme.red : theme.secondaryText;
+  const voteLabel = collection.preview_item_likes_supported
+    ? isVoting
+      ? item.your_vote
+        ? "Removing like..."
+        : "Liking..."
+      : item.your_vote
+        ? "Liked"
+        : "Like"
+    : "Likes unavailable";
+  const trimmedCommentText = commentText.trim();
+
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      isSubmittingRef.current = false;
+      isVotingRef.current = false;
+    };
+  }, []);
 
   function toggleVote() {
-    if (!ctx?.login || !collection.preview_item_likes_supported) return;
+    if (
+      !ctx?.login ||
+      !collection.preview_item_likes_supported ||
+      isVotingRef.current
+    ) {
+      return;
+    }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    isVotingRef.current = true;
+    setIsVoting(true);
+
     const action = item.your_vote
       ? LotideService.removeCollectionTargetItemVote(
           ctx,
@@ -189,29 +254,64 @@ function SourceItemBody({
           itemId,
         );
 
-    action.then(onChanged).catch(() => {
-      Alert.alert("Vote failed");
-    });
+    action
+      .then(() => {
+        if (!isMountedRef.current) return;
+
+        onChanged();
+      })
+      .catch(error => {
+        if (!isMountedRef.current) return;
+
+        Alert.alert("Vote failed", getErrorMessage(error));
+      })
+      .finally(() => {
+        isVotingRef.current = false;
+
+        if (isMountedRef.current) {
+          setIsVoting(false);
+        }
+      });
   }
 
   function submitComment() {
-    if (!ctx?.login || !commentText.trim()) return;
+    if (!ctx?.login || !trimmedCommentText || isSubmittingRef.current) return;
 
+    const login = ctx.login;
+    const content = trimmedCommentText;
+
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     LotideService.commentOnCollectionTargetItem(
       ctx,
       collectionTargetId,
       itemId,
-      commentText.trim(),
+      content,
     )
-      .then(() => {
+      .then(result => {
+        if (!isMountedRef.current) return;
+
+        onCommentAccepted(
+          buildAcceptedSourceItemComment(
+            result.id,
+            content,
+            login.user,
+          ),
+        );
         setCommentText("");
         onChanged();
       })
-      .catch(() => {
-        Alert.alert("Could not submit comment");
+      .catch(error => {
+        if (!isMountedRef.current) return;
+
+        Alert.alert("Could not submit comment", getErrorMessage(error));
       })
-      .finally(() => setIsSubmitting(false));
+      .finally(() => {
+        if (isMountedRef.current) {
+          isSubmittingRef.current = false;
+          setIsSubmitting(false);
+        }
+      });
   }
 
   return (
@@ -278,6 +378,7 @@ function SourceItemBody({
           onPress={toggleVote}
           style={[
             styles.voteRow,
+            isVoting && styles.disabledButton,
             { backgroundColor: theme.secondaryBackground },
           ]}
         >
@@ -285,16 +386,12 @@ function SourceItemBody({
             name={item.your_vote ? "heart" : "heart-outline"}
             size={24}
             color={
-              canVote || item.your_vote ? theme.red : theme.tertiaryBackground
+              collection.preview_item_likes_supported || item.your_vote
+                ? voteColor
+                : theme.tertiaryBackground
             }
           />
-          <Text style={{ color: theme.text }}>
-            {collection.preview_item_likes_supported
-              ? item.your_vote
-                ? "Liked"
-                : "Like"
-              : "Likes unavailable"}
-          </Text>
+          <Text style={{ color: theme.text }}>{voteLabel}</Text>
         </Pressable>
       )}
       <Text style={[styles.sectionTitle, { color: theme.text }]}>Comments</Text>
@@ -327,20 +424,21 @@ function SourceItemBody({
           <Pressable
             accessibilityLabel="Send comment"
             accessibilityRole="button"
-            disabled={isSubmitting || !commentText.trim()}
+            accessibilityState={{ disabled: isSubmitting || !trimmedCommentText }}
+            disabled={isSubmitting || !trimmedCommentText}
             onPress={submitComment}
             style={[
               styles.sendButton,
               {
                 backgroundColor:
-                  isSubmitting || !commentText.trim()
+                  isSubmitting || !trimmedCommentText
                     ? theme.tertiaryBackground
                     : theme.tint,
               },
             ]}
           >
             <Text style={{ color: "#111827", fontWeight: "600" }}>
-              Send
+              {isSubmitting ? "Sending..." : "Send"}
             </Text>
           </Pressable>
         </View>
@@ -406,10 +504,45 @@ function parseFiniteNumber(value: string | number | undefined) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function buildAcceptedSourceItemComment(
+  id: CommentId,
+  content: string,
+  author?: Profile,
+): CollectionTargetItemComment {
+  return {
+    id,
+    content_markdown: content,
+    content_text: content,
+    content_html: null,
+    created: new Date().toISOString(),
+    local: true,
+    author,
+    sensitive: false,
+  };
+}
+
+function upsertSourceItemComment(
+  sourceItem: CollectionTargetItem,
+  comment: CollectionTargetItemComment,
+): CollectionTargetItem {
+  const index = sourceItem.comments.findIndex(item => item.id === comment.id);
+  const comments =
+    index < 0
+      ? [...sourceItem.comments, comment]
+      : [
+          ...sourceItem.comments.slice(0, index),
+          comment,
+          ...sourceItem.comments.slice(index + 1),
+        ];
+
+  return {
+    ...sourceItem,
+    comments,
+  };
+}
+
 function openExternal(url: string) {
-  Linking.openURL(url).catch(() => {
-    Alert.alert("Link", url, undefined, { cancelable: true });
-  });
+  void openExternalLink(url);
 }
 
 const styles = StyleSheet.create({
@@ -457,6 +590,9 @@ const styles = StyleSheet.create({
     minHeight: MINIMUM_TOUCH_TARGET_SIZE,
     paddingHorizontal: 14,
   },
+  disabledButton: {
+    opacity: 0.6,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
@@ -475,6 +611,9 @@ const styles = StyleSheet.create({
   },
   commentForm: {
     marginTop: 16,
+  },
+  inlineRetry: {
+    marginBottom: 16,
   },
   commentInput: {
     borderRadius: 8,

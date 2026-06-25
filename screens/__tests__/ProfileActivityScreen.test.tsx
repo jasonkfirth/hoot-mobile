@@ -12,6 +12,7 @@
     Responsibilities:
 
         • Verify profile activity loads from the service layer
+        • Verify paged activity appends without duplicate rows or requests
         • Verify comment activity navigates to the related post
         • Verify empty activity renders without crashing
 
@@ -23,7 +24,8 @@
 */
 
 import * as React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { Alert } from "react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider } from "react-redux";
 import configureStoreMock from "redux-mock-store";
 
@@ -77,6 +79,22 @@ function renderWithStore(ui: React.ReactElement) {
   );
 }
 
+function deferred<T>() {
+  let resolveValue: (value: T | PromiseLike<T>) => void = () => undefined;
+  let rejectValue: (reason?: unknown) => void = () => undefined;
+
+  const promise = new Promise<T>((resolve, reject) => {
+    resolveValue = resolve;
+    rejectValue = reject;
+  });
+
+  return {
+    promise,
+    resolve: resolveValue,
+    reject: rejectValue,
+  };
+}
+
 describe("ProfileActivityScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -111,6 +129,11 @@ describe("ProfileActivityScreen", () => {
       federation_status: "sent",
     });
     mockUnfollowUser.mockResolvedValue(undefined);
+    jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   test("loads activity and opens the related post for comments", async () => {
@@ -243,6 +266,175 @@ describe("ProfileActivityScreen", () => {
     });
   });
 
+  test("keeps visible profile activity when a refresh fails", async () => {
+    const navigation = { navigate: jest.fn() };
+    const route = {
+      key: "profile-activity",
+      name: "ProfileActivity",
+      params: { userId: 1, username: "sj_zero" },
+    };
+    mockGetUserThings
+      .mockResolvedValueOnce({
+        items: [
+          {
+            type: "comment",
+            id: 44,
+            content_html: "<p>Useful reply</p>",
+            created: "2026-06-04T09:18:08.311607+00:00",
+            post: {
+              id: 12,
+              title: "Parent post",
+            },
+          },
+        ],
+        next_page: null,
+      })
+      .mockRejectedValueOnce(new Error("offline"));
+    mockGetUserData
+      .mockResolvedValueOnce({
+        id: 1,
+        username: "sj_zero",
+        host: "lotide.fbxl.net",
+        local: true,
+        description: {
+          content_text: "I use Lotide.",
+          content_markdown: null,
+          content_html: null,
+        },
+      })
+      .mockRejectedValueOnce(new Error("offline"));
+
+    const screen = await renderWithStore(
+      <ProfileActivityScreen
+        navigation={navigation as never}
+        route={route as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Parent post")).toBeTruthy();
+      expect(screen.getByText("Useful reply")).toBeTruthy();
+      expect(screen.getByText("sj_zero")).toBeTruthy();
+    });
+    expect(screen.getByTestId("profile-activity-list").props.refreshing)
+      .toBe(false);
+
+    await act(async () => {
+      screen.getByTestId("profile-activity-list").props.onRefresh();
+    });
+
+    await waitFor(() => {
+      expect(mockGetUserThings).toHaveBeenCalledTimes(2);
+      expect(mockGetUserData).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Cannot load activity")).toBeTruthy();
+      expect(screen.getByText("Cannot load profile")).toBeTruthy();
+      expect(screen.getByText("Parent post")).toBeTruthy();
+      expect(screen.getByText("Useful reply")).toBeTruthy();
+      expect(screen.getByText("sj_zero")).toBeTruthy();
+      expect(screen.getByTestId("profile-activity-list").props.refreshing)
+        .toBe(false);
+    });
+  });
+
+  test("loads each profile activity page once and deduplicates overlap", async () => {
+    const navigation = { navigate: jest.fn() };
+    const route = {
+      key: "profile-activity",
+      name: "ProfileActivity",
+      params: { userId: 1, username: "sj_zero" },
+    };
+    const nextPage = deferred<{
+      items: Record<string, unknown>[];
+      next_page: string | null;
+    }>();
+
+    mockGetUserThings
+      .mockResolvedValueOnce({
+        items: [
+          {
+            type: "comment",
+            id: 44,
+            content_html: "<p>First page reply</p>",
+            created: "2026-06-04T09:18:08.311607+00:00",
+            post: {
+              id: 12,
+              title: "Parent post",
+            },
+          },
+        ],
+        next_page: "page-2",
+      })
+      .mockReturnValueOnce(nextPage.promise);
+
+    const screen = await renderWithStore(
+      <ProfileActivityScreen
+        navigation={navigation as never}
+        route={route as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("First page reply")).toBeTruthy();
+    });
+
+    await act(async () => {
+      screen.getByTestId("profile-activity-list").props.onEndReached();
+      screen.getByTestId("profile-activity-list").props.onEndReached();
+    });
+
+    await waitFor(() => {
+      expect(mockGetUserThings).toHaveBeenCalledTimes(2);
+      expect(mockGetUserThings).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          apiUrl: "https://lotide.fbxl.net/api/unstable",
+        }),
+        1,
+        "page-2",
+      );
+    });
+
+    await act(async () => {
+      nextPage.resolve({
+        items: [
+          {
+            type: "comment",
+            id: 44,
+            content_html: "<p>First page reply</p>",
+            created: "2026-06-04T09:18:08.311607+00:00",
+            post: {
+              id: 12,
+              title: "Parent post",
+            },
+          },
+          {
+            type: "post",
+            id: 55,
+            title: "Second page post",
+            author: {
+              id: 1,
+              username: "sj_zero",
+              host: "lotide.fbxl.net",
+              local: true,
+            },
+            community: {
+              id: 7,
+              name: "lotide",
+              host: "lotide.fbxl.net",
+              local: true,
+            },
+          },
+        ],
+        next_page: null,
+      });
+      await nextPage.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("First page reply")).toHaveLength(1);
+      expect(screen.getByText("Second page post")).toBeTruthy();
+    });
+  });
+
   test("offers follow and message actions for other users on Lotide 0.18", async () => {
     const navigation = { navigate: jest.fn() };
     const route = {
@@ -288,6 +480,120 @@ describe("ProfileActivityScreen", () => {
       userId: 2,
       username: "remote",
     });
+  });
+
+  test("prevents duplicate profile unfollow requests while pending", async () => {
+    const navigation = { navigate: jest.fn() };
+    const route = {
+      key: "profile-activity",
+      name: "ProfileActivity",
+      params: { userId: 2, username: "remote" },
+    };
+    const pendingUnfollow = deferred<void>();
+    mockGetUserThings.mockResolvedValue({
+      items: [],
+      next_page: null,
+    });
+    mockGetUserData.mockResolvedValue({
+      id: 2,
+      username: "remote",
+      host: "remote.example",
+      local: false,
+      your_follow: {
+        accepted: true,
+        federation_status: "received",
+      },
+    });
+    mockUnfollowUser.mockReturnValue(pendingUnfollow.promise);
+
+    const screen = await renderWithStore(
+      <ProfileActivityScreen
+        navigation={navigation as never}
+        route={route as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Unfollow remote" }))
+        .toBeTruthy();
+    });
+
+    await fireEvent.press(screen.getByRole("button", { name: "Unfollow remote" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Unfollow remote" }));
+
+    await waitFor(() => {
+      expect(mockUnfollowUser).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Unfollowing...")).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Unfollow remote" }).props
+          .accessibilityState.disabled,
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      pendingUnfollow.resolve(undefined);
+      await pendingUnfollow.promise;
+    });
+
+    await waitFor(() => {
+      expect(mockGetUserThings).toHaveBeenCalledTimes(2);
+      expect(mockGetUserData).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  test("ignores profile unfollow failures after leaving the screen", async () => {
+    const navigation = { navigate: jest.fn() };
+    const route = {
+      key: "profile-activity",
+      name: "ProfileActivity",
+      params: { userId: 2, username: "remote" },
+    };
+    const pendingUnfollow = deferred<void>();
+    mockGetUserThings.mockResolvedValue({
+      items: [],
+      next_page: null,
+    });
+    mockGetUserData.mockResolvedValue({
+      id: 2,
+      username: "remote",
+      host: "remote.example",
+      local: false,
+      your_follow: {
+        accepted: true,
+        federation_status: "received",
+      },
+    });
+    mockUnfollowUser.mockReturnValue(pendingUnfollow.promise);
+
+    const screen = await renderWithStore(
+      <ProfileActivityScreen
+        navigation={navigation as never}
+        route={route as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Unfollow remote" }))
+        .toBeTruthy();
+    });
+
+    await fireEvent.press(screen.getByRole("button", { name: "Unfollow remote" }));
+
+    await waitFor(() => {
+      expect(mockUnfollowUser).toHaveBeenCalledTimes(1);
+    });
+
+    await screen.unmount();
+
+    const drainedUnfollow = pendingUnfollow.promise.catch(() => undefined);
+    pendingUnfollow.reject(new Error("late unfollow failure"));
+
+    await drainedUnfollow;
+    await Promise.resolve();
+
+    expect(Alert.alert).not.toHaveBeenCalledWith("Failed to unfollow user");
+    expect(mockGetUserThings).toHaveBeenCalledTimes(1);
+    expect(mockGetUserData).toHaveBeenCalledTimes(1);
   });
 });
 

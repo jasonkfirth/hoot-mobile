@@ -32,12 +32,15 @@ Notable current features:
   * Gated Lotide 0.18 user follow/unfollow controls and profile messaging
     entry points.
   * Runtime validation and normalization for Lotide API responses.
+  * Root render error recovery so a broken screen can show a retry state
+    instead of leaving the app blank.
   * Current HTML rendering through react-native-render-html.
   * Android local notification polling through expo-background-task,
     expo-task-manager, and expo-notifications, including notification tap
     routing back into related Hoot screens.
   * Native Android project files under android/.
-  * Debian Android build and emulator smoke-test helpers under build_scripts/.
+  * Debian Android build and device/emulator smoke-test helpers under
+    build_scripts/.
   * Jest, ESLint, TypeScript, npm audit, and Android release-build validation.
 
 See changelog.txt for the detailed 0.2.0 change list.
@@ -145,19 +148,31 @@ project.
 
 ## Validation
 
-Run the main validation commands before committing:
+Run the release validation command before committing:
+
+```bash
+npm run verify:release
+```
+
+That command runs the normal release gate for this tree:
 
 ```bash
 npm run lint:strict
 npm test
+expo install --check
 npm audit --audit-level=moderate
-npx expo install --check
-npx expo-doctor
 ```
 
 The strict lint command runs ESLint with unused-disable reporting, checks
 Git-visible text files for whitespace/newline/conflict-marker problems, and
-runs TypeScript in no-emit mode.
+verifies Hoot source headers and footers, checks mirrored Android native
+metadata, rejects deprecated package metadata, rejects direct app console calls
+outside the centralized diagnostic logger, rejects focused or skipped Jest
+tests, then runs TypeScript in no-emit mode.
+
+Expo doctor is still useful while upgrading SDKs or investigating native module
+skew, but it is not part of the normal release gate unless the project adds it
+as a pinned development dependency.
 
 The test script runs Jest once by default. To run Jest in watch mode:
 
@@ -168,7 +183,8 @@ npm run test:watch
 ## Android Build Scripts
 
 The build_scripts/ directory contains Debian-focused helpers for local Android
-release builds, emulator smoke checks, and local Android environment setup.
+release builds, device and emulator smoke checks, and local Android environment
+setup.
 
 Prepare an Android command with the same Java and SDK discovery used by the
 local app launch path:
@@ -179,8 +195,9 @@ local app launch path:
 
 The helper selects an installed Java 17 JDK, finds the Android SDK from
 ANDROID_SDK_ROOT, ANDROID_HOME, ~/Android/Sdk, or ~/android-sdk, exports the
-available Android AVD directory, sets NODE_ENV=development when the caller did
-not provide one, and then executes the requested command.
+available Android AVD directory from ANDROID_AVD_HOME, XDG_CONFIG_HOME, the
+default ~/.config location, or ~/.android, sets NODE_ENV=development when the
+caller did not provide one, and then executes the requested command.
 
 Build an APK:
 
@@ -196,11 +213,11 @@ That command runs:
 
 The build script:
 
-  * installs baseline Debian packages when apt-get is available;
+  * optionally installs baseline Debian packages when explicitly requested;
   * selects a Java 17 JDK when one is installed;
   * sets ANDROID_HOME to ~/android-sdk by default;
   * installs Android command-line tools if needed;
-  * runs npm ci, falling back to npm install if configured to do so;
+  * runs npm ci, falling back to npm install only when explicitly configured;
   * runs expo prebuild --platform android --no-install;
   * builds the release APK with Gradle.
 
@@ -214,11 +231,54 @@ The build script recognizes these environment variables:
 
 ```text
 HOOT_MOBILE_NODE_ENV
+HOOT_MOBILE_INSTALL_SYSTEM_DEPS
 HOOT_MOBILE_BUILD_NO_DEV_DEPS
 HOOT_MOBILE_NPM_FALLBACK_INSTALL
 ```
 
-Smoke-test an APK on an emulator:
+Set HOOT_MOBILE_INSTALL_SYSTEM_DEPS=1 only when you want the build helper to
+run apt-get for the host packages it needs. Without that flag, missing Node.js
+or Java 17 is reported as an environment problem to fix explicitly.
+
+Set HOOT_MOBILE_NPM_FALLBACK_INSTALL=1 only when you intentionally want the
+build helper to retry a failed npm ci with npm install. The default release path
+keeps npm ci failures hard so the lockfile cannot drift during a build.
+
+Smoke-test an APK on an attached phone or already running emulator:
+
+```bash
+./build_scripts/android-smoke-launch.sh android/app/build/outputs/apk/release/app-release.apk
+```
+
+The same smoke helper is available through npm:
+
+```bash
+npm run smoke:android -- android/app/build/outputs/apk/release/app-release.apk
+```
+
+The smoke helper installs the APK, clears logcat, launches
+org.brokenlamp.hoot, waits for the app process to become the focused activity,
+and fails if fresh package-scoped AndroidRuntime, React Native JavaScript, or
+ANR crash output appears in logcat. The AndroidRuntime check is intentionally
+scoped to org.brokenlamp.hoot because Android's monkey launcher and system apps
+also write benign AndroidRuntime log lines during a healthy launch. Set
+HOOT_MOBILE_SKIP_INSTALL=1 to launch and check an already installed copy of the
+app. The smoke helper also checks the installed APK for
+android.permission.POST_NOTIFICATIONS and reports whether Android 13+ has
+granted that runtime permission. A fresh install is expected to report the
+permission as not granted until the app's notification enablement flow asks for
+it.
+
+To prepare an emulator or test phone for local notification testing without
+using the in-app prompt, grant the runtime notification permission during the
+smoke launch:
+
+```bash
+HOOT_MOBILE_GRANT_NOTIFICATIONS=1 \
+  ./build_scripts/android-smoke-launch.sh android/app/build/outputs/apk/release/app-release.apk
+```
+
+Smoke-test an APK on a managed emulator:
 
 ```bash
 ./build_scripts/debian-test-hoot-mobile-android.sh
@@ -235,16 +295,19 @@ The emulator helper:
   * finds the Android SDK from ANDROID_SDK_ROOT, ANDROID_HOME, ~/Android/Sdk,
     or ~/android-sdk;
   * finds AVD metadata from ANDROID_AVD_HOME, XDG_CONFIG_HOME/.android/avd,
-    or ~/.android/avd;
-  * installs emulator dependencies when apt-get is available;
+    ~/.config/.android/avd, or ~/.android/avd;
+  * optionally installs host emulator dependencies when explicitly requested;
   * creates an Android 34 Google APIs x86_64 AVD named HootTest;
   * reports recent emulator logs if the emulator exits before ADB or boot
     completion;
-  * installs the APK with adb;
-  * launches org.brokenlamp.hoot with monkey.
+  * delegates install, launch, foreground-state, and crash-log validation to
+    build_scripts/android-smoke-launch.sh.
 
 Set HOOT_MOBILE_KEEP_EMULATOR=1 to leave the emulator running after the script
 finishes.
+
+Set HOOT_MOBILE_INSTALL_EMULATOR_DEPS=1 only when you want the emulator helper
+to run apt-get for qemu/libvirt-related host packages.
 
 ## Android Project Files
 
@@ -265,10 +328,15 @@ intentional native source/configuration changes under android/.
 Because android/ is checked in, Expo and EAS do not automatically sync native
 app config fields into the Android project during every build. Treat app.json
 and android/ as intentionally mirrored for native metadata such as the package
-id, app icon, splash screen, URL scheme, orientation, and native plugins. When
-one of those values changes, regenerate or review the Android project and
-commit the matching native diff. The matching Expo Doctor sync warning is
-disabled in package.json for this reason; the rest of Expo Doctor still runs.
+id, app icon, splash screen, URL scheme, orientation, native permissions, and
+native plugins. When one of those values changes, regenerate or review the
+Android project and commit the matching native diff. The matching Expo Doctor
+sync warning is disabled in package.json for this reason; the rest of Expo
+Doctor still runs.
+
+The release gate runs scripts/check-android-native-metadata.js to verify the
+mirrored Android package id, version, app name, orientation, URL scheme,
+permissions, icon background, splash background, and system UI style.
 
 ## Notifications
 
@@ -276,6 +344,11 @@ Android notifications are local polling notifications. They are enabled from
 the app settings screen, require OS notification permission, poll when the app
 starts or resumes, and also run when Android allows the background task to
 execute.
+
+Android 13 and newer require android.permission.POST_NOTIFICATIONS in the native
+manifest before the runtime permission prompt can grant local alerts. Keep that
+permission mirrored between app.json and android/app/src/main/AndroidManifest.xml
+when regenerating the native project.
 
 The app keeps a per-account local notification baseline so a notification can
 still be shown on the phone even if another Lotide client has already fetched
@@ -292,7 +365,16 @@ the follower profile. Private-message notifications on Lotide 0.18 servers open
 the related conversation. Enabling notifications first creates the local
 channel and asks the OS for notification permission, then creates the local
 baseline. If permission, baselining, or task registration fails, the setting is
-left disabled and the app reports the error.
+left disabled and the app reports the error. The settings screen also shows
+local-alert permission status, background-polling registration status, and a
+test-notification action for proving the Android channel can display alerts on
+the current device. It also records and displays the last poll attempt, last
+successful poll, last local alert count, skipped-poll reason, and last poll
+error. If Android reports notification permission is blocked, settings shows a
+system notification-settings shortcut. Use the settings "Check Notifications
+Now" action when validating a real account because it polls the Lotide server
+immediately through the same local-alert path used by startup, foreground
+resume, and the background task.
 
 ## Web Output
 

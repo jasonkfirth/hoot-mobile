@@ -24,11 +24,11 @@
 
 import Icon from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
-  Linking,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
 } from "react-native";
@@ -43,8 +43,13 @@ import useTheme from "../hooks/useTheme";
 import * as Haptics from "../services/HapticService";
 import * as LotideService from "../services/LotideService";
 import { RootStackScreenProps } from "../types";
+import { getErrorMessage } from "../utils/error";
+import { openExternalLink } from "../utils/externalLink";
 import { sourceKindLabel, sourceSoftwareLabel } from "../utils/sourceLabels";
-import { MINIMUM_TOUCH_TARGET_SIZE, TOUCH_TARGET_HIT_SLOP } from "../constants/TouchTargets";
+import {
+  MINIMUM_TOUCH_TARGET_SIZE,
+  TOUCH_TARGET_HIT_SLOP,
+} from "../constants/TouchTargets";
 
 export default function SourceScreen({
   route,
@@ -57,6 +62,7 @@ export default function SourceScreen({
   );
   const [loadError, setLoadError] = useState("");
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [reloadId, setReloadId] = useState(0);
   const canUseSources = supportsCollectionTargets(ctx?.apiVersion);
 
@@ -76,6 +82,10 @@ export default function SourceScreen({
         if (!isActive) return;
         setLoadError("Cannot load source feed");
         setHasLoaded(true);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setIsRefreshing(false);
       });
 
     return () => {
@@ -111,6 +121,12 @@ export default function SourceScreen({
     setReloadId(x => x + 1);
   }
 
+  function refreshFromGesture() {
+    setLoadError("");
+    setIsRefreshing(true);
+    setReloadId(x => x + 1);
+  }
+
   if (!source && loadError) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
@@ -131,8 +147,12 @@ export default function SourceScreen({
 
   return (
     <ScrollView
+      testID="source-detail-scroll"
       style={[styles.root, { backgroundColor: theme.background }]}
       contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl refreshing={isRefreshing} onRefresh={refreshFromGesture} />
+      }
     >
       <SourceHeader source={source} onChanged={refresh} />
       {loadError ? (
@@ -181,33 +201,81 @@ function SourceHeader({
 }) {
   const ctx = useLotideCtx();
   const theme = useTheme();
+  const [isFollowActionPending, setIsFollowActionPending] = useState(false);
+  const isMountedRef = useRef(true);
+  const followActionPendingRef = useRef(false);
   const isFollowing = !!source.your_follow;
+  const followLabel = source.your_follow?.accepted ? "Unfollow" : "Cancel Follow";
+  const pendingFollowLabel = isFollowing
+    ? source.your_follow?.accepted
+      ? "Unfollowing..."
+      : "Canceling..."
+    : "Following...";
 
-  function followOrUnfollow() {
-    if (!ctx?.login) return;
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      followActionPendingRef.current = false;
+    };
+  }, []);
 
-    if (isFollowing) {
-      LotideService.unfollowCollectionTarget(ctx, source.id)
-        .then(onChanged)
-        .catch(() => {
-          Alert.alert("Failed to unfollow feed");
-        });
-      return;
+  function alertIfMounted(title: string, message?: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
+  }
+
+  function startFollowAction() {
+    if (followActionPendingRef.current) return false;
+
+    followActionPendingRef.current = true;
+    setIsFollowActionPending(true);
+    return true;
+  }
+
+  function finishFollowAction() {
+    followActionPendingRef.current = false;
+
+    if (isMountedRef.current) {
+      setIsFollowActionPending(false);
     }
+  }
 
-    LotideService.followCollectionTarget(ctx, source.id)
-      .then(result => {
-        if (!result.accepted) {
-          Alert.alert(
-            "Follow request sent",
-            "The remote feed has not accepted the follow yet.",
-          );
+  async function followOrUnfollow() {
+    if (!ctx?.login) return;
+    if (!startFollowAction()) return;
+
+    try {
+      if (isFollowing) {
+        await LotideService.unfollowCollectionTarget(ctx, source.id);
+
+        if (isMountedRef.current) {
+          onChanged();
         }
+        return;
+      }
+
+      const result = await LotideService.followCollectionTarget(ctx, source.id);
+
+      if (!isMountedRef.current) return;
+
+      if (!result.accepted) {
+        alertIfMounted(
+          "Follow request sent",
+          "The remote feed has not accepted the follow yet.",
+        );
+      }
+
+      if (isMountedRef.current) {
         onChanged();
-      })
-      .catch(() => {
-        Alert.alert("Failed to follow feed");
-      });
+      }
+    } catch {
+      alertIfMounted(
+        isFollowing ? "Failed to unfollow feed" : "Failed to follow feed",
+      );
+    } finally {
+      finishFollowAction();
+    }
   }
 
   return (
@@ -251,14 +319,20 @@ function SourceHeader({
         <View style={styles.buttonRow}>
           <AppButton
             title={
-              isFollowing
-                ? source.your_follow?.accepted
-                  ? "Unfollow"
-                  : "Cancel Follow"
-                : "Follow"
+              isFollowActionPending
+                ? pendingFollowLabel
+                : isFollowing
+                  ? followLabel
+                  : "Follow"
+            }
+            accessibilityLabel={
+              isFollowing ? "Unfollow source feed" : "Follow source feed"
             }
             color={isFollowing ? theme.secondaryTint : theme.tint}
-            onPress={followOrUnfollow}
+            disabled={isFollowActionPending}
+            onPress={() => {
+              void followOrUnfollow();
+            }}
           />
         </View>
       )}
@@ -281,13 +355,26 @@ function PreviewItem({
   const theme = useTheme();
   const navigation =
     useNavigation<RootStackScreenProps<"CollectionTarget">["navigation"]>();
-  const canVote = !!ctx?.login && likesSupported;
+  const [isVoting, setIsVoting] = useState(false);
+  const isMountedRef = useRef(true);
+  const isVotingRef = useRef(false);
+  const canVote = !!ctx?.login && likesSupported && !isVoting;
   const voteColor = item.your_vote ? theme.red : theme.secondaryText;
 
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      isVotingRef.current = false;
+    };
+  }, []);
+
   function toggleVote() {
-    if (!ctx?.login || !likesSupported) return;
+    if (!ctx?.login || !likesSupported || isVotingRef.current) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    isVotingRef.current = true;
+    setIsVoting(true);
+
     const action = item.your_vote
       ? LotideService.removeCollectionTargetItemVote(
           ctx,
@@ -300,9 +387,24 @@ function PreviewItem({
           item.id,
         );
 
-    action.then(onChanged).catch(() => {
-      Alert.alert("Vote failed");
-    });
+    action
+      .then(() => {
+        if (!isMountedRef.current) return;
+
+        onChanged();
+      })
+      .catch(error => {
+        if (!isMountedRef.current) return;
+
+        Alert.alert("Vote failed", getErrorMessage(error));
+      })
+      .finally(() => {
+        isVotingRef.current = false;
+
+        if (isMountedRef.current) {
+          setIsVoting(false);
+        }
+      });
   }
 
   return (
@@ -341,12 +443,16 @@ function PreviewItem({
           hitSlop={TOUCH_TARGET_HIT_SLOP}
           disabled={!canVote}
           onPress={toggleVote}
-          style={styles.voteButton}
+          style={[styles.voteButton, isVoting && styles.disabledButton]}
         >
           <Icon
             name={item.your_vote ? "heart" : "heart-outline"}
             size={25}
-            color={canVote || item.your_vote ? voteColor : theme.tertiaryBackground}
+            color={
+              likesSupported || item.your_vote
+                ? voteColor
+                : theme.tertiaryBackground
+            }
           />
         </Pressable>
       )}
@@ -389,9 +495,7 @@ function parseFiniteNumber(value: string | number | undefined) {
 }
 
 function openExternal(url: string) {
-  Linking.openURL(url).catch(() => {
-    Alert.alert("Link", url, undefined, { cancelable: true });
-  });
+  void openExternalLink(url);
 }
 
 const styles = StyleSheet.create({
@@ -459,6 +563,9 @@ const styles = StyleSheet.create({
     height: MINIMUM_TOUCH_TARGET_SIZE,
     justifyContent: "center",
     width: MINIMUM_TOUCH_TARGET_SIZE,
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });
 

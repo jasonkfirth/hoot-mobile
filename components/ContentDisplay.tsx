@@ -26,7 +26,6 @@
 import React, { useMemo, useState } from "react";
 import {
   Alert,
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -39,12 +38,15 @@ import RenderHtml, {
   TNodeChildrenRenderer,
   type CustomRendererProps,
   type CustomTagRendererRecord,
+  type MixedStyleDeclaration,
+  type MixedStyleRecord,
   type TBlock,
   type TPhrasing,
 } from "react-native-render-html";
 import Icon from "@expo/vector-icons/Ionicons";
 import useTheme from "../hooks/useTheme";
 import { TOUCH_TARGET_HIT_SLOP } from "../constants/TouchTargets";
+import { openExternalLink } from "../utils/externalLink";
 
 export interface ContentDisplayProps {
   contentHtml?: string | null;
@@ -53,6 +55,8 @@ export interface ContentDisplayProps {
   maxChars?: number;
   postId?: PostId;
 }
+
+const IGNORED_DOM_TAGS = ["iframe", "script"];
 
 export default function ContentDisplay(props: ContentDisplayProps) {
   const {
@@ -76,6 +80,7 @@ export default function ContentDisplay(props: ContentDisplayProps) {
   const contentWidth = Math.max(0, width - 30);
   const monoFont = Platform.OS === "ios" ? "Menlo" : "monospace";
 
+  const source = useMemo(() => ({ html }), [html]);
   const renderers = useMemo(
     () => ({
       abbr: AbbrRenderer,
@@ -84,53 +89,72 @@ export default function ContentDisplay(props: ContentDisplayProps) {
     }) as unknown as CustomTagRendererRecord,
     [],
   );
+  const renderersProps = useMemo(
+    () => ({
+      a: {
+        onPress: (_event: unknown, href: string) => {
+          void openExternalLink(href);
+        },
+      },
+    }),
+    [],
+  );
+  const baseStyle = useMemo<MixedStyleDeclaration>(
+    () => ({
+      color: theme.text,
+    }),
+    [theme.text],
+  );
+  const tagsStyles = useMemo<MixedStyleRecord>(
+    () => ({
+      a: {
+        color: theme.secondaryTint,
+      },
+      blockquote: {
+        borderLeftWidth: 2,
+        borderColor: theme.secondaryText,
+        paddingLeft: 10,
+        paddingVertical: 5,
+      },
+      cite: { fontStyle: "italic" },
+      del: {
+        textDecorationLine: "line-through",
+        textDecorationStyle: "solid",
+      },
+      dfn: { fontStyle: "italic" },
+      hr: {
+        borderBottomWidth: StyleSheet.hairlineWidth || 1,
+        borderColor: theme.secondaryText,
+        marginVertical: 8,
+      },
+      ins: { textDecorationLine: "underline" },
+      kbd: {
+        backgroundColor: theme.tertiaryBackground,
+        paddingHorizontal: 4,
+      },
+      samp: { fontFamily: monoFont },
+      small: { fontSize: 10 },
+      sub: { fontSize: 10 },
+      sup: { fontSize: 10 },
+    }),
+    [
+      monoFont,
+      theme.secondaryText,
+      theme.secondaryTint,
+      theme.tertiaryBackground,
+    ],
+  );
 
   return (
     <View>
       <RenderHtml
         contentWidth={contentWidth}
-        source={{ html }}
-        ignoredDomTags={["iframe", "script"]}
+        source={source}
+        ignoredDomTags={IGNORED_DOM_TAGS}
         renderers={renderers}
-        renderersProps={{
-          a: {
-            onPress: (_event, href) => openLink(href),
-          },
-        }}
-        baseStyle={{
-          color: theme.text,
-        }}
-        tagsStyles={{
-          a: {
-            color: theme.secondaryTint,
-          },
-          blockquote: {
-            borderLeftWidth: 2,
-            borderColor: theme.secondaryText,
-            paddingLeft: 10,
-            paddingVertical: 5,
-          },
-          cite: { fontStyle: "italic" },
-          del: {
-            textDecorationLine: "line-through",
-            textDecorationStyle: "solid",
-          },
-          dfn: { fontStyle: "italic" },
-          hr: {
-            borderBottomWidth: StyleSheet.hairlineWidth || 1,
-            borderColor: theme.secondaryText,
-            marginVertical: 8,
-          },
-          ins: { textDecorationLine: "underline" },
-          kbd: {
-            backgroundColor: theme.tertiaryBackground,
-            paddingHorizontal: 4,
-          },
-          samp: { fontFamily: monoFont },
-          small: { fontSize: 10 },
-          sub: { fontSize: 10 },
-          sup: { fontSize: 10 },
-        }}
+        renderersProps={renderersProps}
+        baseStyle={baseStyle}
+        tagsStyles={tagsStyles}
       />
       {isTruncated && (
         <Text style={{ color: theme.secondaryText, paddingVertical: 15 }}>
@@ -228,21 +252,6 @@ function escapeHtml(text: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function openLink(href: string) {
-  if (!isOpenableUrl(href)) {
-    Alert.alert("Link", href, undefined, { cancelable: true });
-    return;
-  }
-
-  Linking.openURL(href).catch(() => {
-    Alert.alert("Link", href, undefined, { cancelable: true });
-  });
-}
-
-function isOpenableUrl(href: string) {
-  return /^(https?:|mailto:)/i.test(href);
 }
 
 function AbbrRenderer({

@@ -61,10 +61,12 @@ export const commentSlice = createSlice({
     },
     setCommentVote: (
       state,
-      action: PayloadAction<{ id: PostId; vote: boolean }>,
+      action: PayloadAction<{ id: CommentId; vote: boolean }>,
     ) => {
       const p = action.payload;
       const post = state.comments[p.id];
+      if (!post) return;
+
       if (post.your_vote !== p.vote) {
         post.your_vote = p.vote;
         if (p.vote) {

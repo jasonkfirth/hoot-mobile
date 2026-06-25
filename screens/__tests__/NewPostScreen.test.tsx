@@ -25,7 +25,7 @@ import * as React from "react";
 import { Alert } from "react-native";
 import { Provider } from "react-redux";
 import configureStoreMock from "redux-mock-store";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 
 import NewPostScreen from "../NewPostScreen";
 
@@ -63,6 +63,21 @@ jest.mock("../../components/SuggestLogin", () => ({
 }));
 
 const mockStore = configureStoreMock([]);
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
+  };
+}
 
 async function renderWithStore(ui: React.ReactElement) {
   const store = mockStore({
@@ -227,6 +242,119 @@ describe("NewPostScreen", () => {
         }),
       },
     });
+  });
+
+  test("blocks duplicate post submissions while one is pending", async () => {
+    const submitPost = createDeferred<{ id: number }>();
+    mockSubmitPost.mockReturnValue(submitPost.promise);
+    const navigation = {
+      addListener: jest.fn().mockReturnValue(() => {}),
+      navigate: jest.fn(),
+    };
+    const route = {
+      key: "new-post",
+      name: "NewPostScreen",
+      params: {
+        community: {
+          id: 1,
+          name: "lotide",
+          host: "lotide.fbxl.net",
+          local: false,
+        },
+      },
+    };
+
+    const { screen } = await renderWithStore(
+      <NewPostScreen navigation={navigation as never} route={route as never} />,
+    );
+
+    await fireEvent.changeText(
+      screen.getByPlaceholderText("Add a Title"),
+      "Lotide launch",
+    );
+    await fireEvent.press(screen.getByText("Submit"));
+
+    await waitFor(() => {
+      expect(mockSubmitPost).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Submit new post" }).props
+        .accessibilityState.disabled).toBe(true);
+      expect(screen.getByText("Submitting...")).toBeTruthy();
+    });
+
+    await fireEvent.press(screen.getByText("Submitting..."));
+
+    expect(mockSubmitPost).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      submitPost.resolve({ id: 99 });
+      await submitPost.promise;
+    });
+
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith("Post", { postId: 99 });
+    });
+  });
+
+  test("ignores created post reloads after leaving the composer", async () => {
+    const createdPost = createDeferred<unknown>();
+    mockGetPost.mockReturnValue(createdPost.promise);
+    const navigation = {
+      addListener: jest.fn().mockReturnValue(() => {}),
+      navigate: jest.fn(),
+    };
+    const route = {
+      key: "new-post",
+      name: "NewPostScreen",
+      params: {
+        community: {
+          id: 1,
+          name: "lotide",
+          host: "lotide.fbxl.net",
+          local: false,
+        },
+      },
+    };
+
+    const { store, screen } = await renderWithStore(
+      <NewPostScreen navigation={navigation as never} route={route as never} />,
+    );
+
+    await fireEvent.changeText(
+      screen.getByPlaceholderText("Add a Title"),
+      "Lotide launch",
+    );
+    await fireEvent.press(screen.getByText("Submit"));
+
+    await waitFor(() => {
+      expect(mockGetPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiUrl: "https://lotide.fbxl.net/api/unstable",
+        }),
+        99,
+      );
+    });
+
+    await act(async () => {
+      screen.unmount();
+    });
+
+    const drainedPost = createdPost.promise.then(() => undefined);
+    createdPost.resolve({
+      id: 99,
+      title: "Lotide launch",
+      community: {
+        id: 1,
+        name: "lotide",
+        host: "lotide.fbxl.net",
+        local: false,
+      },
+    });
+
+    await drainedPost;
+    await Promise.resolve();
+
+    expect(store.getActions()).toEqual([]);
+    expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
   test("shows a friendly alert when post submission fails", async () => {

@@ -6,13 +6,14 @@
 
     Purpose:
 
-        Persist Lotide context and saved account records.
+        Persist Lotide context, saved account records, and app settings.
 
     Responsibilities:
 
         - Read and write the active context
         - Maintain keyed account storage
         - Support account removal and logout persistence
+        - Keep small app preferences defensively parsed
 
     This file intentionally does NOT contain:
 
@@ -21,6 +22,7 @@
 */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { normalizeLotideApiUrl } from "./LotideService/util";
 
 /* ------------------------------------------------------------------------- */
 /* JSON Storage Helpers                                                      */
@@ -53,7 +55,7 @@ async function readJsonRecord(path: string): Promise<Record<string, unknown>> {
 }
 
 function asLotideContext(value: unknown): LotideContext | undefined {
-  return isRecord(value) ? (value as LotideContext) : undefined;
+  return isRecord(value) ? normalizeLotideContext(value as LotideContext) : undefined;
 }
 
 function asLotideContextStore(
@@ -62,12 +64,62 @@ function asLotideContextStore(
   const out: { [key: string]: LotideContext } = {};
 
   Object.entries(value).forEach(([key, ctx]) => {
-    if (isRecord(ctx)) {
-      out[key] = ctx as LotideContext;
-    }
+    const context = asLotideContext(ctx);
+    if (!context) return;
+
+    const normalizedKey = accountStoreKeyForContext(context) ??
+      normalizeAccountStoreKey(key);
+
+    /*
+        Old stores can contain both locked and unlocked copies of the same
+        account under cosmetically different API URLs. Prefer the unlocked copy
+        when entries collapse to the same canonical key.
+    */
+    if (out[normalizedKey]?.login && !context.login) return;
+
+    out[normalizedKey] = context;
   });
 
   return out;
+}
+
+function normalizeLotideContext(ctx: LotideContext): LotideContext {
+  if (!ctx.apiUrl) return ctx;
+
+  const apiUrl = normalizeLotideApiUrl(ctx.apiUrl);
+  return apiUrl === ctx.apiUrl ? ctx : { ...ctx, apiUrl };
+}
+
+function accountStoreKeyForContext(ctx: LotideContext): string | undefined {
+  if (!ctx.apiUrl || !ctx.login?.user?.username) return undefined;
+
+  return `${ctx.login.user.username}@${normalizeLotideApiUrl(ctx.apiUrl)}`;
+}
+
+function normalizeAccountStoreKey(key: string): string {
+  const separator = key.indexOf("@");
+  if (separator < 0) return key;
+
+  const username = key.slice(0, separator);
+  const apiUrl = key.slice(separator + 1);
+
+  if (!username || !apiUrl) return key;
+
+  return `${username}@${normalizeLotideApiUrl(apiUrl)}`;
+}
+
+async function writeLotideContextStore(
+  store: { [key: string]: LotideContext },
+): Promise<void> {
+  await AsyncStorage.setItem("@lotide_ctx_arr", JSON.stringify(store));
+}
+
+function asSortOption(value: unknown): SortOption | undefined {
+  if (value === "hot" || value === "new" || value === "top") {
+    return value;
+  }
+
+  return undefined;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -76,14 +128,19 @@ function asLotideContextStore(
 
 export const lotideContext = {
   async store(ctx: LotideContext) {
-    return AsyncStorage.setItem("@lotide_ctx", JSON.stringify(ctx));
+    return AsyncStorage.setItem(
+      "@lotide_ctx",
+      JSON.stringify(normalizeLotideContext(ctx)),
+    );
   },
   async remove() {
     return AsyncStorage.removeItem("@lotide_ctx");
   },
   async query(): Promise<LotideContext | undefined> {
     const ctx = await readJsonRecord("@lotide_ctx");
-    return Object.keys(ctx).length > 0 ? (ctx as LotideContext) : undefined;
+    return Object.keys(ctx).length > 0
+      ? normalizeLotideContext(ctx as LotideContext)
+      : undefined;
   },
 };
 
@@ -93,23 +150,45 @@ export const lotideContext = {
 
 export const lotideContextKV = {
   async store(ctx: LotideContext) {
-    if (!ctx.login?.user) return;
-    const name = `${ctx.login.user.username}@${ctx.apiUrl}`;
-    return serviceKV.store("@lotide_ctx_arr", name, ctx);
+    const normalizedCtx = normalizeLotideContext(ctx);
+    const name = accountStoreKeyForContext(normalizedCtx);
+    if (!name) return;
+
+    const store = asLotideContextStore(await readJsonRecord("@lotide_ctx_arr"));
+    store[name] = normalizedCtx;
+    await writeLotideContextStore(store);
   },
   async query(k: string): Promise<LotideContext | undefined> {
-    return serviceKV.query<LotideContext>("@lotide_ctx_arr", k);
+    const store = asLotideContextStore(await readJsonRecord("@lotide_ctx_arr"));
+    return store[normalizeAccountStoreKey(k)];
   },
   async listKeys(): Promise<string[]> {
-    return serviceKV.listKeys("@lotide_ctx_arr");
+    return Object.keys(asLotideContextStore(await readJsonRecord("@lotide_ctx_arr")));
   },
   async remove(k: string): Promise<LotideContext | undefined> {
-    return serviceKV.remove("@lotide_ctx_arr", k);
+    const normalizedKey = normalizeAccountStoreKey(k);
+    const rawStore = await readJsonRecord("@lotide_ctx_arr");
+    const store = asLotideContextStore(rawStore);
+    const removed = store[normalizedKey];
+
+    Object.keys(rawStore).forEach(key => {
+      if (normalizeAccountStoreKey(key) === normalizedKey) {
+        delete rawStore[key];
+      }
+    });
+    delete store[normalizedKey];
+
+    await writeLotideContextStore(asLotideContextStore(rawStore));
+    return removed;
   },
   async logout(ctx: LotideContext) {
-    if (!ctx.login?.user) return;
-    const name = `${ctx.login.user.username}@${ctx.apiUrl}`;
-    return serviceKV.store("@lotide_ctx_arr", name, { apiUrl: ctx.apiUrl });
+    const normalizedCtx = normalizeLotideContext(ctx);
+    const name = accountStoreKeyForContext(normalizedCtx);
+    if (!name) return;
+
+    const store = asLotideContextStore(await readJsonRecord("@lotide_ctx_arr"));
+    store[name] = { apiUrl: normalizedCtx.apiUrl };
+    await writeLotideContextStore(store);
   },
   async getStore(): Promise<{ [key: string]: LotideContext }> {
     return asLotideContextStore(await readJsonRecord("@lotide_ctx_arr"));
@@ -117,32 +196,45 @@ export const lotideContextKV = {
 };
 
 /* ------------------------------------------------------------------------- */
-/* Generic Key-Value Storage                                                 */
+/* App Settings Storage                                                      */
 /* ------------------------------------------------------------------------- */
 
-const serviceKV = {
-  async store<T>(path: string, k: string, v: T) {
-    const store = await readJsonRecord(path);
-    store[k] = v;
-    await AsyncStorage.setItem(path, JSON.stringify(store));
+export type AppSettings = {
+  defaultFeedSort: SortOption;
+};
+
+const defaultAppSettings: AppSettings = {
+  defaultFeedSort: "hot",
+};
+
+function normalizeAppSettings(value: Record<string, unknown>): AppSettings {
+  return {
+    defaultFeedSort:
+      asSortOption(value.defaultFeedSort) ??
+      defaultAppSettings.defaultFeedSort,
+  };
+}
+
+export const appSettings = {
+  defaults: defaultAppSettings,
+
+  async store(settings: AppSettings) {
+    await AsyncStorage.setItem("@hoot_app_settings", JSON.stringify(settings));
   },
 
-  async query<T>(path: string, k: string): Promise<T | undefined> {
-    const store = await readJsonRecord(path);
-    return asLotideContext(store[k]) as T | undefined;
+  async query(): Promise<AppSettings> {
+    return normalizeAppSettings(await readJsonRecord("@hoot_app_settings"));
   },
 
-  async listKeys(path: string): Promise<string[]> {
-    const store = await readJsonRecord(path);
-    return Object.keys(store);
-  },
+  async update(settings: Partial<AppSettings>): Promise<AppSettings> {
+    const current = await appSettings.query();
+    const next = normalizeAppSettings({
+      ...current,
+      ...settings,
+    });
 
-  async remove<T>(path: string, k: string): Promise<T | undefined> {
-    const store = await readJsonRecord(path);
-    const v = asLotideContext(store[k]) as T | undefined;
-    delete store[k];
-    await AsyncStorage.setItem(path, JSON.stringify(store));
-    return v;
+    await appSettings.store(next);
+    return next;
   },
 };
 

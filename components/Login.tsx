@@ -20,7 +20,7 @@
         - global app bootstrapping
 */
 
-import React, { useRef, useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
   Keyboard,
@@ -33,6 +33,7 @@ import {
 import AppButton from "./AppButton";
 import { Text, TextInput, View } from "./Themed";
 import * as LotideService from "../services/LotideService";
+import * as StorageService from "../services/StorageService";
 import useTheme from "../hooks/useTheme";
 import { useNavigation } from "@react-navigation/core";
 import { useDispatch } from "react-redux";
@@ -53,87 +54,140 @@ export default function Login(props: LoginProps) {
   const [username, setUsername] = useState(props.username || "");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const usernameRef = useRef<DefaultTextInput>(null);
   const passwordRef = useRef<DefaultTextInput>(null);
   const theme = useTheme();
   const dispatch = useDispatch();
   const navigation = useNavigation<RootStackScreenProps<"ForgotPassword">["navigation"]>();
+  const isMountedRef = useRef(true);
+
+  useLayoutEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  function alertIfMounted(title: string, message: string) {
+    if (!isMountedRef.current) return;
+
+    Alert.alert(title, message);
+  }
 
   function fail(message: string) {
-    Alert.alert("Failed to submit", message);
+    alertIfMounted("Failed to submit", message);
   }
 
-  function register() {
-    if (!username) return fail("Please enter a username");
-    if (!password) return fail("Enter a password");
-    if (!email) return fail("Please enter an email address");
+  async function activateContext(ctx: LotideContext): Promise<boolean> {
+    if (!isMountedRef.current) return false;
 
-    LotideService.register(
-      `https://${props.domain}/api/unstable`,
-      username,
-      password,
-      email,
-    )
-      .then(data => {
-        dispatch(
-          setCtx({
-            apiUrl: `https://${props.domain}/api/unstable`,
-            login: data,
-          }),
-        );
-      })
-      .catch(e => {
-        Alert.alert("Failed to register", getErrorMessage(e));
-      });
+    await StorageService.lotideContextKV.store(ctx);
+
+    if (!isMountedRef.current) return false;
+
+    await StorageService.lotideContext.store(ctx);
+
+    if (!isMountedRef.current) return false;
+
+    dispatch(setCtx(ctx));
+
+    return true;
   }
 
-  function login() {
-    if (!username) return fail("Please enter a username");
+  async function register() {
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim();
+
+    if (!trimmedUsername) return fail("Please enter a username");
+    if (!password) return fail("Enter a password");
+    if (!trimmedEmail) return fail("Please enter an email address");
+
+    setIsSubmitting(true);
+
+    try {
+      const data = await LotideService.register(
+        `https://${props.domain}/api/unstable`,
+        trimmedUsername,
+        password,
+        trimmedEmail,
+      );
+      if (!isMountedRef.current) return;
+
+      await activateContext({
+        apiUrl: `https://${props.domain}/api/unstable`,
+        login: data,
+      });
+    } catch (e) {
+      alertIfMounted("Failed to register", getErrorMessage(e));
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
+  }
+
+  async function login() {
+    const trimmedUsername = username.trim();
+
+    if (!trimmedUsername) return fail("Please enter a username");
     if (!password) return fail("Enter a password");
 
-    LotideService.login(
-      `https://${props.domain}/api/unstable`,
-      username,
-      password,
-    )
-      .then(data => {
-        dispatch(
-          setCtx({
-            apiUrl: `https://${props.domain}/api/unstable`,
-            login: data,
-          }),
-        );
-      })
-      .catch(e => {
-        Alert.alert("Failed to login", getErrorMessage(e));
+    setIsSubmitting(true);
+
+    try {
+      const data = await LotideService.login(
+        `https://${props.domain}/api/unstable`,
+        trimmedUsername,
+        password,
+      );
+      if (!isMountedRef.current) return;
+
+      await activateContext({
+        apiUrl: `https://${props.domain}/api/unstable`,
+        login: data,
       });
+    } catch (e) {
+      alertIfMounted("Failed to login", getErrorMessage(e));
+      if (isMountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
   }
 
   function submit() {
+    if (isSubmitting) return;
+
     if (isRegistering) {
-      register();
+      void register();
     } else {
-      login();
+      void login();
     }
+  }
+
+  function submitTitle() {
+    if (isSubmitting && isRegistering) return "Registering...";
+    if (isSubmitting) return "Logging in...";
+
+    return isRegistering ? "Register" : "Login";
   }
 
   return (
     <Pressable
+      accessible={false}
       style={{ flex: 1 }}
       onPress={() => Platform.OS !== "web" && Keyboard.dismiss()}
     >
       <KeyboardAvoidingView style={styles.root} behavior="padding">
         {props.hostName ? (
-          <Pressable style={{ alignItems: "center" }}>
+          <View style={styles.hostHeader}>
             <Text style={styles.name}>{props.hostName}</Text>
             <Text style={[styles.domain, { color: theme.secondaryText }]}>
               {props.domain}
             </Text>
-          </Pressable>
+          </View>
         ) : (
-          <Pressable>
+          <View style={styles.hostHeader}>
             <Text style={{ fontSize: 24 }}>{props.domain}</Text>
-          </Pressable>
+          </View>
         )}
         <Pressable
           accessibilityLabel={
@@ -141,6 +195,7 @@ export default function Login(props: LoginProps) {
           }
           accessibilityRole="button"
           hitSlop={TOUCH_TARGET_HIT_SLOP}
+          disabled={isSubmitting}
           onPress={() => setIsRegistering(x => !x)}
         >
           <Text style={[styles.loginRegister, { color: theme.secondaryText }]}>
@@ -171,6 +226,7 @@ export default function Login(props: LoginProps) {
             placeholder="Email Address"
             value={email}
             onChangeText={setEmail}
+            editable={!isSubmitting}
             keyboardType="email-address"
             textContentType="emailAddress"
             autoComplete="email"
@@ -184,6 +240,7 @@ export default function Login(props: LoginProps) {
           placeholder="Username"
           value={username}
           onChangeText={setUsername}
+          editable={!isSubmitting}
           keyboardType="ascii-capable"
           textContentType="username"
           autoComplete="username"
@@ -196,6 +253,7 @@ export default function Login(props: LoginProps) {
           placeholder="Password"
           value={password}
           onChangeText={setPassword}
+          editable={!isSubmitting}
           secureTextEntry={true}
           textContentType={isRegistering ? "newPassword" : "password"}
           autoComplete="password"
@@ -204,6 +262,7 @@ export default function Login(props: LoginProps) {
         />
         {!isRegistering && (
           <Pressable
+            accessibilityLabel="Reset forgotten password"
             style={{ padding: 15 }}
             accessibilityRole="button"
             onPress={() =>
@@ -220,12 +279,14 @@ export default function Login(props: LoginProps) {
             title="Change Host"
             onPress={props.onGoBack}
             color={theme.secondaryTint}
+            disabled={isSubmitting}
             style={styles.actionButton}
           />
           <AppButton
-            title={isRegistering ? "Register" : "Login"}
+            title={submitTitle()}
             onPress={submit}
             color={theme.tint}
+            disabled={isSubmitting}
             style={styles.actionButton}
           />
         </View>
@@ -247,6 +308,9 @@ const styles = StyleSheet.create({
   },
   domain: {
     fontWeight: "300",
+  },
+  hostHeader: {
+    alignItems: "center",
   },
   loginRegister: {
     padding: 15,

@@ -31,6 +31,7 @@ import * as TaskManager from "expo-task-manager";
 
 import * as LotideService from "./LotideService";
 import * as StorageService from "./StorageService";
+import { logError } from "../utils/debugLog";
 
 /* ------------------------------------------------------------------------- */
 /* Constants and Types                                                      */
@@ -40,7 +41,9 @@ const POLL_TASK_NAME = "hoot-mobile-lotide-notification-poll";
 const POLL_INTERVAL_MINUTES = 15;
 const SETTINGS_KEY = "@lotide_notification_background_enabled";
 const STATE_KEY = "@lotide_notification_poll_state";
+const POLL_DIAGNOSTICS_KEY = "@lotide_notification_poll_diagnostics";
 const MAX_TRACKED_NOTIFICATION_IDS = 250;
+const MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL = 5;
 
 /*
     Android preserves a channel's user-facing importance and sound after the
@@ -67,6 +70,20 @@ type NotificationState = {
   [accountKey: string]: NotificationStateEntry;
 };
 
+export type NotificationPollDiagnostics = {
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  lastScheduledAt?: string;
+  lastScheduledCount: number;
+  lastSkippedReason?: string;
+};
+
+type NotificationPollSkippedReason =
+  | "disabled"
+  | "no_context"
+  | "permission_denied";
+
 export type NotificationPollTaskRegistrationResult =
   | "registered"
   | "unregistered"
@@ -76,6 +93,20 @@ export type NotificationPollTaskRegistrationResult =
 
 type NotificationPollTaskRegistrationOptions = {
   requireAvailable?: boolean;
+};
+
+export type NotificationDiagnostics = {
+  supported: boolean;
+  enabled: boolean;
+  permissionCanAskAgain: boolean;
+  permissionGranted: boolean;
+  permissionStatus: string;
+  backgroundAvailable: boolean;
+  backgroundStatus: string;
+  taskRegistered: boolean;
+  channelId: string;
+  poll: NotificationPollDiagnostics;
+  error?: string;
 };
 
 export type NotificationNavigationTarget =
@@ -135,6 +166,37 @@ function notificationFingerprint(notification: FullNotification): string {
   return `reply:${notification.origin.type}:${notification.postId}:${notification.commentId}:${notification.origin.id}`;
 }
 
+function trackedNotificationIdsForPage(
+  currentIds: string[],
+  previousIds: string[] = [],
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  /*
+      The server page just fetched is more useful than older local history.
+
+      Lotide usually sends the newest notification page first, but the important
+      contract here is simpler: keep the current page before older cache entries
+      so a bounded AsyncStorage record cannot immediately forget items we just
+      observed.
+  */
+  const appendIds = (ids: string[]) => {
+    for (const id of ids) {
+      if (out.length >= MAX_TRACKED_NOTIFICATION_IDS) break;
+      if (seen.has(id)) continue;
+
+      seen.add(id);
+      out.push(id);
+    }
+  };
+
+  appendIds(currentIds);
+  appendIds(previousIds);
+
+  return out;
+}
+
 function notificationContent(notification: FullNotification) {
   if (notification.kind === "user_follow") {
     const actor = notification.actor?.username ?? "Someone";
@@ -177,6 +239,21 @@ function notificationContent(notification: FullNotification) {
       : "New Lotide post reply",
     body: "Open the app to view your latest notifications.",
     sound: "default" as const,
+  };
+}
+
+function summaryNotificationContent(extraCount: number) {
+  const suffix = extraCount === 1
+    ? "1 more new notification is"
+    : `${extraCount} more new notifications are`;
+
+  return {
+    title: "New Lotide notifications",
+    body: `${suffix} waiting in Hoot.`,
+    sound: "default" as const,
+    data: {
+      lotideKind: "notification_summary",
+    },
   };
 }
 
@@ -226,6 +303,25 @@ function asPositiveInteger(value: unknown): number | undefined {
   return undefined;
 }
 
+function asNonNegativeInteger(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+
+  if (typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)) {
+    return Number(value);
+  }
+
+  return undefined;
+}
+
+function asIsoTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (Number.isNaN(Date.parse(value))) return undefined;
+
+  return value;
+}
+
 export function getNotificationNavigationTarget(
   data: Record<string, unknown>,
 ): NotificationNavigationTarget | undefined {
@@ -243,6 +339,12 @@ export function getNotificationNavigationTarget(
   }
 
   if (data.lotideKind === "user_follow") {
+    return {
+      screen: "Notifications",
+    };
+  }
+
+  if (data.lotideKind === "notification_summary") {
     return {
       screen: "Notifications",
     };
@@ -386,7 +488,89 @@ async function storeCurrentNotificationBaseline(
   const ids = notifications.map(notificationFingerprint);
   await setNotificationStateEntry(buildAccountKey(ctx), {
     initialized: true,
-    ids,
+    ids: trackedNotificationIdsForPage(ids),
+  });
+}
+
+function normalizePollDiagnostics(
+  value: unknown,
+): NotificationPollDiagnostics {
+  if (!isObject(value)) {
+    return {
+      lastScheduledCount: 0,
+    };
+  }
+
+  return {
+    lastAttemptAt: asIsoTimestamp(value.lastAttemptAt),
+    lastSuccessAt: asIsoTimestamp(value.lastSuccessAt),
+    lastError: typeof value.lastError === "string"
+      ? value.lastError
+      : undefined,
+    lastScheduledAt: asIsoTimestamp(value.lastScheduledAt),
+    lastScheduledCount: asNonNegativeInteger(value.lastScheduledCount) ?? 0,
+    lastSkippedReason: typeof value.lastSkippedReason === "string"
+      ? value.lastSkippedReason
+      : undefined,
+  };
+}
+
+async function loadPollDiagnostics(): Promise<NotificationPollDiagnostics> {
+  const stored = await AsyncStorage.getItem(POLL_DIAGNOSTICS_KEY);
+  return normalizePollDiagnostics(parseJsonObject(stored));
+}
+
+async function updatePollDiagnostics(
+  patch: Partial<NotificationPollDiagnostics>,
+): Promise<void> {
+  const existing = await loadPollDiagnostics();
+  const next = {
+    ...existing,
+    ...patch,
+  };
+
+  await AsyncStorage.setItem(POLL_DIAGNOSTICS_KEY, JSON.stringify(next));
+}
+
+async function recordPollSuccess(
+  attemptAt: string,
+  scheduledCount: number,
+  skippedReason?: NotificationPollSkippedReason,
+): Promise<void> {
+  const patch: Partial<NotificationPollDiagnostics> = {
+    lastSuccessAt: attemptAt,
+    lastError: undefined,
+    lastScheduledCount: scheduledCount,
+    lastSkippedReason: skippedReason,
+  };
+
+  if (scheduledCount > 0) {
+    patch.lastScheduledAt = attemptAt;
+  }
+
+  await updatePollDiagnostics(patch);
+}
+
+async function recordPollSkipped(
+  skippedReason: NotificationPollSkippedReason,
+): Promise<void> {
+  const attemptAt = new Date().toISOString();
+
+  await updatePollDiagnostics({
+    lastAttemptAt: attemptAt,
+    lastSuccessAt: attemptAt,
+    lastError: undefined,
+    lastScheduledCount: 0,
+    lastSkippedReason: skippedReason,
+  });
+}
+
+async function recordPollFailure(
+  error: unknown,
+): Promise<void> {
+  await updatePollDiagnostics({
+    lastError: getErrorText(error),
+    lastScheduledCount: 0,
   });
 }
 
@@ -405,6 +589,30 @@ function permissionAllowsNotifications(
   permission: Awaited<ReturnType<typeof Notifications.getPermissionsAsync>>,
 ): boolean {
   return permission.granted || permission.status === "granted";
+}
+
+function permissionCanAskAgain(
+  permission: Awaited<ReturnType<typeof Notifications.getPermissionsAsync>>,
+): boolean {
+  return permission.canAskAgain === true;
+}
+
+function getErrorText(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+function permissionStatusText(
+  permission: Awaited<ReturnType<typeof Notifications.getPermissionsAsync>>,
+): string {
+  if (typeof permission.status === "string") {
+    return permission.status;
+  }
+
+  return permission.granted ? "granted" : "unknown";
 }
 
 async function ensureChannel() {
@@ -432,45 +640,63 @@ async function ensureNotificationActivationReady(): Promise<void> {
 }
 
 async function runPollAndNotifyForContext(ctx: LotideContext): Promise<number> {
-  const enabled = await readEnabledSetting();
-  if (!enabled) return 0;
+  const attemptAt = new Date().toISOString();
+  await updatePollDiagnostics({
+    lastAttemptAt: attemptAt,
+    lastError: undefined,
+  });
 
-  const permission = await Notifications.getPermissionsAsync();
-  const canNotify = permissionAllowsNotifications(permission);
-  if (!canNotify) return 0;
+  try {
+    const enabled = await readEnabledSetting();
+    if (!enabled) {
+      await recordPollSuccess(attemptAt, 0, "disabled");
+      return 0;
+    }
 
-  const accountKey = buildAccountKey(ctx);
-  const accountState = await getNotificationStateEntry(accountKey);
-  const known = new Set(accountState.ids);
-  const notifications = await LotideService.getNotifications(ctx);
-  const currentIds = notifications.map(notificationFingerprint);
-  const candidates = accountState.initialized
-    ? notifications.filter(item => !known.has(notificationFingerprint(item)))
-    : notifications.filter(item => item.unseen);
+    const permission = await Notifications.getPermissionsAsync();
+    const canNotify = permissionAllowsNotifications(permission);
+    if (!canNotify) {
+      await recordPollSuccess(attemptAt, 0, "permission_denied");
+      return 0;
+    }
 
-  if (!accountState.initialized && notifications.length === 0) {
-    await setNotificationStateEntry(accountKey, {
-      initialized: true,
-      ids: [],
-    });
-    return 0;
-  }
+    const accountKey = buildAccountKey(ctx);
+    const accountState = await getNotificationStateEntry(accountKey);
+    const known = new Set(accountState.ids);
+    const notifications = await LotideService.getNotifications(ctx);
+    const currentIds = notifications.map(notificationFingerprint);
+    const nextTrackedIds = trackedNotificationIdsForPage(
+      currentIds,
+      accountState.ids,
+    );
+    const candidates = accountState.initialized
+      ? notifications.filter(item => !known.has(notificationFingerprint(item)))
+      : notifications.filter(item => item.unseen);
 
-  if (candidates.length === 0) {
-    if (!accountState.initialized) {
+    if (!accountState.initialized && notifications.length === 0) {
       await setNotificationStateEntry(accountKey, {
         initialized: true,
-        ids: currentIds,
+        ids: [],
       });
+      await recordPollSuccess(attemptAt, 0);
+      return 0;
     }
-    return 0;
-  }
 
-  const combinedIds = Array.from(new Set([...accountState.ids, ...currentIds]));
+    if (candidates.length === 0) {
+      await setNotificationStateEntry(accountKey, {
+        initialized: true,
+        ids: nextTrackedIds,
+      });
+      await recordPollSuccess(attemptAt, 0);
+      return 0;
+    }
 
-  await ensureChannel();
-  await Promise.all(
-    candidates.map(item =>
+    await ensureChannel();
+
+    const individualCandidates =
+      candidates.slice(0, MAX_INDIVIDUAL_NOTIFICATIONS_PER_POLL);
+    const hiddenCandidateCount = candidates.length - individualCandidates.length;
+    const scheduleRequests = individualCandidates.map(item =>
       Notifications.scheduleNotificationAsync({
         content: {
           ...notificationContent(item),
@@ -478,15 +704,29 @@ async function runPollAndNotifyForContext(ctx: LotideContext): Promise<number> {
         },
         trigger: { channelId: NOTIFICATION_CHANNEL_ID },
       }),
-    ),
-  );
+    );
 
-  const trimmed = combinedIds.slice(-MAX_TRACKED_NOTIFICATION_IDS);
-  await setNotificationStateEntry(accountKey, {
-    initialized: true,
-    ids: trimmed,
-  });
-  return candidates.length;
+    if (hiddenCandidateCount > 0) {
+      scheduleRequests.push(
+        Notifications.scheduleNotificationAsync({
+          content: summaryNotificationContent(hiddenCandidateCount),
+          trigger: { channelId: NOTIFICATION_CHANNEL_ID },
+        }),
+      );
+    }
+
+    await Promise.all(scheduleRequests);
+
+    await setNotificationStateEntry(accountKey, {
+      initialized: true,
+      ids: nextTrackedIds,
+    });
+    await recordPollSuccess(attemptAt, scheduleRequests.length);
+    return scheduleRequests.length;
+  } catch (error) {
+    await recordPollFailure(error);
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -497,13 +737,14 @@ TaskManager.defineTask(POLL_TASK_NAME, async () => {
   try {
     const ctx = await StorageService.lotideContext.query();
     if (!ctx?.login) {
+      await recordPollSkipped("no_context");
       return BackgroundTask.BackgroundTaskResult.Success;
     }
 
     await runPollAndNotifyForContext(ctx);
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch (error) {
-    console.error("Lotide notification poll failed", error);
+    logError("Lotide notification poll failed", error);
     return BackgroundTask.BackgroundTaskResult.Failed;
   }
 });
@@ -561,6 +802,87 @@ export async function getNotificationEnabled(): Promise<boolean> {
   return readEnabledSetting();
 }
 
+export async function getNotificationDiagnostics(): Promise<NotificationDiagnostics> {
+  const errors: string[] = [];
+  let enabled = false;
+  let poll: NotificationPollDiagnostics = {
+    lastScheduledCount: 0,
+  };
+
+  try {
+    enabled = await readEnabledSetting();
+  } catch (error) {
+    errors.push(`setting read failed: ${getErrorText(error)}`);
+  }
+
+  try {
+    poll = await loadPollDiagnostics();
+  } catch (error) {
+    errors.push(`poll diagnostics read failed: ${getErrorText(error)}`);
+  }
+
+  if (Platform.OS !== "android") {
+    return {
+      supported: false,
+      enabled,
+      permissionCanAskAgain: false,
+      permissionGranted: false,
+      permissionStatus: "unsupported",
+      backgroundAvailable: false,
+      backgroundStatus: "unsupported",
+      taskRegistered: false,
+      channelId: NOTIFICATION_CHANNEL_ID,
+      poll,
+      error: errors.length > 0 ? errors.join("; ") : undefined,
+    };
+  }
+
+  let canAskPermissionAgain = false;
+  let permissionGranted = false;
+  let permissionStatus = "unknown";
+  let backgroundAvailable = false;
+  let backgroundStatus = "unknown";
+  let taskRegistered = false;
+
+  try {
+    const permission = await Notifications.getPermissionsAsync();
+    canAskPermissionAgain = permissionCanAskAgain(permission);
+    permissionGranted = permissionAllowsNotifications(permission);
+    permissionStatus = permissionStatusText(permission);
+  } catch (error) {
+    errors.push(`permission check failed: ${getErrorText(error)}`);
+  }
+
+  try {
+    const status = await BackgroundTask.getStatusAsync();
+    backgroundAvailable =
+      status === BackgroundTask.BackgroundTaskStatus.Available;
+    backgroundStatus = String(status);
+  } catch (error) {
+    errors.push(`background status failed: ${getErrorText(error)}`);
+  }
+
+  try {
+    taskRegistered = await TaskManager.isTaskRegisteredAsync(POLL_TASK_NAME);
+  } catch (error) {
+    errors.push(`task registration check failed: ${getErrorText(error)}`);
+  }
+
+  return {
+    supported: true,
+    enabled,
+    permissionCanAskAgain: canAskPermissionAgain,
+    permissionGranted,
+    permissionStatus,
+    backgroundAvailable,
+    backgroundStatus,
+    taskRegistered,
+    channelId: NOTIFICATION_CHANNEL_ID,
+    poll,
+    error: errors.length > 0 ? errors.join("; ") : undefined,
+  };
+}
+
 export async function setNotificationEnabled(
   enabled: boolean,
   ctx?: LotideContext,
@@ -587,6 +909,26 @@ export async function setNotificationEnabled(
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(false));
     throw error;
   }
+}
+
+export async function sendTestNotification(): Promise<string> {
+  if (Platform.OS !== "android") {
+    throw new Error("Local notification tests are only available on Android.");
+  }
+
+  await ensureNotificationActivationReady();
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: "Hoot notification test",
+      body: "Local Android notifications are working.",
+      sound: "default",
+      data: {
+        lotideKind: "diagnostic_test",
+      },
+    },
+    trigger: { channelId: NOTIFICATION_CHANNEL_ID },
+  });
 }
 
 export async function pollNotificationsNow(ctx: LotideContext): Promise<number> {

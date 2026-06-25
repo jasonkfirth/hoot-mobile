@@ -23,11 +23,13 @@
 */
 
 import * as React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider } from "react-redux";
 import configureStoreMock from "redux-mock-store";
 
-import NotificationScreen from "../NotificationScreen";
+import NotificationScreen, {
+  refreshNotificationsForScreen,
+} from "../NotificationScreen";
 
 const mockUsePost = jest.fn();
 const mockUseComment = jest.fn();
@@ -84,6 +86,22 @@ function renderWithStore(ui: React.ReactElement, ctx: LotideContext = {}) {
   return render(<Provider store={mockStore({ lotide: { ctx } })}>{ui}</Provider>);
 }
 
+function deferred<T>() {
+  let resolvePromise: (value: T | PromiseLike<T>) => void = () => undefined;
+  let rejectPromise: (reason?: unknown) => void = () => undefined;
+
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+
+  return {
+    promise,
+    resolve: resolvePromise,
+    reject: rejectPromise,
+  };
+}
+
 describe("NotificationScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -115,6 +133,79 @@ describe("NotificationScreen", () => {
       expect(mockGetNotifications).toHaveBeenCalledTimes(1);
     });
     expect(addListener).toHaveBeenCalledWith("focus", expect.any(Function));
+  });
+
+  test("ignores notification responses after refresh cleanup", async () => {
+    const request = deferred<FullNotification[]>();
+    const setNotifications = jest.fn();
+    const setLoadError = jest.fn();
+    const stopLoading = jest.fn();
+
+    mockGetNotifications.mockReturnValueOnce(request.promise);
+
+    const cleanup = refreshNotificationsForScreen(
+      { login: { token: "token-1" } },
+      {
+        setNotifications,
+        setLoadError,
+        stopLoading,
+      },
+    );
+
+    expect(setLoadError).toHaveBeenCalledWith("");
+    setLoadError.mockClear();
+    cleanup();
+
+    request.resolve([
+      {
+        unseen: true,
+        kind: "user_follow",
+        actor: {
+          id: 45,
+          username: "latefollower",
+          host: "example.com",
+          local: false,
+          is_bot: false,
+          remote_url: "https://example.com/@latefollower",
+        },
+      },
+    ]);
+    await request.promise;
+    await Promise.resolve();
+
+    expect(setNotifications).not.toHaveBeenCalled();
+    expect(setLoadError).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  test("ignores notification errors after refresh cleanup", async () => {
+    const request = deferred<FullNotification[]>();
+    const setNotifications = jest.fn();
+    const setLoadError = jest.fn();
+    const stopLoading = jest.fn();
+
+    mockGetNotifications.mockReturnValueOnce(request.promise);
+
+    const cleanup = refreshNotificationsForScreen(
+      { login: { token: "token-1" } },
+      {
+        setNotifications,
+        setLoadError,
+        stopLoading,
+      },
+    );
+
+    expect(setLoadError).toHaveBeenCalledWith("");
+    setLoadError.mockClear();
+    cleanup();
+
+    request.reject(new Error("offline"));
+    await request.promise.catch(() => undefined);
+    await Promise.resolve();
+
+    expect(setNotifications).not.toHaveBeenCalled();
+    expect(setLoadError).not.toHaveBeenCalled();
+    expect(stopLoading).not.toHaveBeenCalled();
   });
 
   test("stays on Sign in prompt when no context exists", async () => {
@@ -201,6 +292,60 @@ describe("NotificationScreen", () => {
 
     await waitFor(() => {
       expect(mockGetNotifications).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  test("keeps visible notifications when a refresh fails", async () => {
+    const addListener = jest.fn().mockReturnValue(() => {});
+    const navigation = { addListener } as { addListener: typeof addListener };
+    mockUsePost.mockReturnValue(undefined);
+    mockUseComment.mockReturnValue(undefined);
+    mockGetNotifications
+      .mockResolvedValueOnce([
+        {
+          unseen: true,
+          kind: "user_follow",
+          actor: {
+            id: 44,
+            username: "newfollower",
+            host: "example.com",
+            local: false,
+            is_bot: false,
+            remote_url: "https://example.com/@alice",
+          },
+        },
+      ])
+      .mockRejectedValueOnce(new Error("offline"));
+
+    const screen = await renderWithStore(
+      <NotificationScreen
+        navigation={navigation as never}
+        route={
+          {
+            key: "NotificationScreen",
+            name: "NotificationScreen",
+            params: undefined,
+          } as never
+        }
+      />,
+      { login: { token: "token-1" } },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("newfollower")).toBeTruthy();
+    });
+
+    await act(async () => {
+      screen.getByTestId("notification-list").props.onRefresh();
+    });
+
+    await waitFor(() => {
+      expect(mockGetNotifications).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Cannot load notifications")).toBeTruthy();
+      expect(screen.getByText("newfollower")).toBeTruthy();
+      expect(
+        screen.getByTestId("notification-list").props.refreshing,
+      ).toBe(false);
     });
   });
 

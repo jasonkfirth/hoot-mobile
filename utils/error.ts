@@ -1,3 +1,26 @@
+/*
+    Project: Hoot Mobile
+    -------------------
+
+    File: error.ts
+
+    Purpose:
+
+        Convert unknown thrown values into user-facing error text.
+
+    Responsibilities:
+
+        - Preserve normal Error messages
+        - Extract message fields from structured thrown values
+        - Provide a stable fallback for undefined or primitive values
+
+    This file intentionally does NOT contain:
+
+        - alert presentation
+        - logging policy
+        - Lotide API response validation
+*/
+
 export function getErrorMessage(error: unknown): string {
   if (typeof error === "string") return error;
 
@@ -15,3 +38,5 @@ export function getErrorMessage(error: unknown): string {
 
   return `${error}`;
 }
+
+/* end of error.ts */

@@ -10,7 +10,7 @@
 
     Responsibilities:
 
-        - Combine post, comment, and Lotide reducers
+        - Combine post, comment, settings, and Lotide reducers
         - Export typed store state and dispatch types
 
     This file intentionally does NOT contain:
@@ -23,12 +23,14 @@ import { configureStore } from "@reduxjs/toolkit";
 import postReducer from "../slices/postSlice";
 import lotideReducer from "../slices/lotideSlice";
 import commentReducer from "../slices/commentSlice";
+import settingsReducer from "../slices/settingsSlice";
 
 const store = configureStore({
   reducer: {
     lotide: lotideReducer,
     posts: postReducer,
     comments: commentReducer,
+    settings: settingsReducer,
   },
 });
 

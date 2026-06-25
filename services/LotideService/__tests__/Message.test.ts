@@ -11,6 +11,8 @@
     Responsibilities:
 
         - Verify private-message endpoint paths and payloads
+        - Verify conversation pagination query construction
+        - Verify thread pagination query construction
         - Verify message response normalization
         - Verify older servers are protected by feature gates
 
@@ -110,6 +112,28 @@ describe("Message service", () => {
 
     expect(global.fetch).toHaveBeenCalledWith(
       "https://lotide.fbxl.net/api/unstable/users/~me/messages?with_user=2",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+  });
+
+  test("loads a later private-message conversation page", async () => {
+    await getPrivateMessageConversations(ctx, "page 2");
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://lotide.fbxl.net/api/unstable/users/~me/messages?conversations=true&page=page%202",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+  });
+
+  test("loads a later private-message thread page", async () => {
+    await getPrivateMessageThread(ctx, 2, "page 2");
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://lotide.fbxl.net/api/unstable/users/~me/messages?with_user=2&page=page%202",
       expect.objectContaining({
         method: "GET",
       }),

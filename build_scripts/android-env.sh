@@ -45,7 +45,7 @@ ANDROID_HOME_CANDIDATES=(
 
 ANDROID_AVD_HOME_CANDIDATES=(
   "${ANDROID_AVD_HOME:-}"
-  "${XDG_CONFIG_HOME:-}/.android/avd"
+  "${XDG_CONFIG_HOME:-$HOME/.config}/.android/avd"
   "$HOME/.android/avd"
 )
 

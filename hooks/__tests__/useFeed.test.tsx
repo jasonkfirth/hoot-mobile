@@ -12,6 +12,7 @@
 
         - Verify route/sort changes reset the visible feed
         - Verify stale in-flight requests cannot append into a newer feed
+        - Verify pending feed loads are ignored after unmount
         - Verify next-page loading appends unique post ids
 
     This file intentionally does NOT contain:
@@ -237,6 +238,34 @@ describe("useFeed", () => {
         undefined,
       );
     });
+  });
+
+  test("ignores feed responses after unmount", async () => {
+    const request = deferred<Paged<Post>>();
+
+    mockGetPosts.mockReturnValueOnce(request.promise);
+
+    const { screen, store } = await renderWithStore(
+      <FeedHarness sort="hot" inYourFollows={true} />,
+    );
+
+    await waitFor(() => {
+      expect(mockGetPosts).toHaveBeenCalledTimes(1);
+    });
+
+    await act(() => {
+      screen.unmount();
+    });
+
+    await act(async () => {
+      request.resolve({
+        items: [post(99)],
+        next_page: null,
+      });
+      await request.promise;
+    });
+
+    expect(store.getActions()).toEqual([]);
   });
 });
 
